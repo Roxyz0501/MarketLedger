@@ -51,6 +51,91 @@ for(uint i=0;i<1200;i++) tracker.Offer([new(i+5000,555,42,false,3,100,"Seller",n
 Check(tracker.ListingCount<=1000,"Listing cache bounded");
 
 string dbfile=Path.Combine(folder,"ledger.db");
+NpcRequest N(string id="npc1",uint quantity=2,uint price=150)=>new(id,now,a,42,"Potion",false,quantity,price,"Potion vendor");
+var spending=new SpendingTracker();
+spending.Request(N());
+Check(spending.Drain(now).Count==0,"NPC click alone is not a purchase");
+spending.Observe(a,now.AddSeconds(1),300,[]);
+Check(spending.Drain(now.AddSeconds(1)).Count==0,"Gil decrease alone is not an NPC receipt");
+spending.Observe(a,now.AddSeconds(2),0,[new(42,false,2)]);
+var npc=spending.Drain(now.AddSeconds(2)).Single();
+Check(npc.Source==ExpenseSource.NpcShop && npc.Total==300 && npc.Tax==0 && npc.RetainerName=="Potion vendor","NPC request + gil + item receipt");
+Check(spending.Drain(now.AddMinutes(1)).Count==0,"NPC debit not duplicated as unclassified");
+spending.Request(N("itemsfirst"));
+spending.Observe(a,now.AddSeconds(1),0,[new(42,false,2)]);
+spending.Observe(a,now.AddSeconds(2),300,[]);
+Check(spending.Drain(now.AddSeconds(2)).Single().Source==ExpenseSource.NpcShop,"Item receipt may precede gil");
+spending.Request(N("failed"));
+Check(spending.Drain(now.AddSeconds(31)).Count==0,"Failed NPC request expires without record");
+spending.Clear(); spending.Request(N("failed-old",1,100)); spending.Request(N("success-new",1,200));
+spending.Observe(a,now.AddSeconds(1),200,[new(42,false,1)]);
+Check(spending.Drain(now.AddSeconds(1)).Count==0,"Ambiguous failed/successful NPC requests do not guess price");
+Check(spending.Drain(now.AddSeconds(32)).Single().Source==ExpenseSource.Unclassified,"Ambiguous debit retained as unclassified");
+spending.Clear(); spending.Request(N("combined1")); spending.Request(N("combined2"));
+spending.Observe(a,now.AddSeconds(1),600,[new(42,false,4)]);
+Check(spending.Drain(now.AddSeconds(1)).Count==2,"Coalesced two NPC purchases");
+var known=new Purchase("known",now.ToUnixTimeSeconds(),a,42,"Market potion",false,2,150,15,"999","777","Retainer",1);
+spending.Clear(); spending.Known(known,now); spending.Observe(a,now.AddSeconds(1),315,[]);
+Check(spending.Drain(now.AddSeconds(32)).Count==0,"Market confirmation before inventory does not double count");
+spending.Clear(); spending.Observe(a,now,315,[]); spending.Known(known,now.AddSeconds(1));
+Check(spending.Drain(now.AddSeconds(32)).Count==0,"Market confirmation after inventory does not double count");
+spending.Clear(); spending.Observe(a,now,400,[]); spending.Known(known,now.AddSeconds(1));
+var extra=spending.Drain(now.AddSeconds(32)).Single();
+Check(extra.Source==ExpenseSource.Unclassified && extra.Total==85 && !extra.TaxKnown,"Residual fee retained with unknown tax");
+spending.Clear(); spending.Request(N("npc-overlap")); spending.MarketRequested(known.ListingId,a,now);
+spending.Observe(a,now.AddSeconds(1),315,[new(42,false,2)]);
+Check(spending.Drain(now.AddSeconds(1)).Count==0,"Outstanding market request prevents mislabelled NPC receipt");
+spending.Known(known,now.AddSeconds(2));
+Check(spending.Drain(now.AddSeconds(32)).Count==0,"Delayed market confirmation cannot become duplicate NPC purchase");
+spending.Clear(); spending.Request(N("npc-flush")); spending.MarketRequested(known.ListingId,a,now);
+spending.Observe(a,now.AddSeconds(1),315,[new(42,false,2)]);
+Check(spending.Drain(now.AddSeconds(2),true).Single().Source==ExpenseSource.Unclassified,"Logout does not guess NPC while market confirmation is pending");
+spending.Clear(); spending.Known(known,now); spending.Observe(b,now,315,[]);
+Check(spending.Drain(now.AddSeconds(32)).Single().Character.Id==b.Id,"Credits never cross characters");
+spending.Clear(); spending.Observe(a,now,100,[],100);
+Check(spending.Drain(now).Single().Source==ExpenseSource.Transfer,"Exact observed deposit separate from spending");
+spending.Clear(); spending.Observe(a,now,100,[],75);
+Check(spending.Drain(now.AddSeconds(31)).Single().Source==ExpenseSource.Unclassified,"Mismatched deposit not guessed");
+spending.Clear(); spending.Request(N()); spending.Observe(a,now,300,[new(99,false,2)]);
+Check(spending.Drain(now.AddSeconds(31)).Single().Source==ExpenseSource.Unclassified,"Wrong item does not confirm NPC purchase");
+spending.Clear(); spending.Request(N()); spending.Observe(a,now,300,[new(42,true,2)]);
+Check(spending.Drain(now.AddSeconds(31)).Single().Source==ExpenseSource.Unclassified,"Wrong quality does not confirm NPC purchase");
+spending.Clear(); spending.Observe(a,now,42,[]);
+Check(spending.Drain(now,true).Single().Total==42 && !spending.HasPending,"Unload flush preserves pending decrease");
+spending.Clear(); spending.Request(N()); spending.Clear();
+spending.Observe(b,now,300,[new(42,false,2)]);
+Check(spending.Drain(now.AddSeconds(31)).Single().Source==ExpenseSource.Unclassified,"Character reset clears NPC request and gains");
+
+string legacy=Path.Combine(folder,"legacy.db");
+using(var oldDb=new Sqlite(legacy))
+{
+    oldDb.Execute("CREATE TABLE purchases (id TEXT PRIMARY KEY,time INTEGER NOT NULL,cid TEXT NOT NULL,character TEXT NOT NULL,home TEXT NOT NULL,world TEXT NOT NULL,item INTEGER NOT NULL,name TEXT NOT NULL,hq INTEGER NOT NULL,quantity INTEGER NOT NULL,unit INTEGER NOT NULL,tax INTEGER NOT NULL,listing TEXT NOT NULL,retainer TEXT NOT NULL,seller TEXT NOT NULL,city INTEGER NOT NULL,subtotal INTEGER NOT NULL,total INTEGER NOT NULL,UNIQUE(world,listing))");
+    oldDb.Execute("INSERT INTO purchases VALUES ('legacy',1234567890,'1','Old Character','Alpha','Beta',42,'Legacy item',0,3,100,15,'123','456','Old seller',1,300,315)");
+    oldDb.Execute("PRAGMA user_version=1");
+}
+using(var migrated=new LedgerStore(legacy))
+{
+    var p=migrated.Query(new(),0,false).Rows.Single();
+    Check(p.Source==ExpenseSource.Market && p.Total==315 && p.TaxKnown && p.RetainerName=="Old seller","v1 migration preserves history and classifies market");
+    Check(Directory.GetFiles(folder,"legacy.db.v1-backup-*").Length==1,"Legacy database backup before migration");
+    Check(migrated.Insert(npc),"NPC row insertion");
+    Check(migrated.Insert(extra),"Unknown outflow row insertion");
+    spending.Clear(); spending.Observe(a,now,500,[],500); var transfer=spending.Drain(now).Single();
+    Check(migrated.Insert(transfer),"Transfer row insertion");
+    Check(migrated.Query(new(),0,false).Totals.Total==615,"Default total excludes unknown and transfer");
+    Check(migrated.Query(new(Source:0),0,false).Totals.Total==315,"Market-only filter");
+    Check(migrated.Query(new(Source:1),0,false).Totals.Total==300,"NPC-only filter");
+    Check(migrated.Query(new(Source:2),0,false).Totals==new Totals(1,0,0,0,85),"Unknown tax not represented as zero known tax");
+    Check(migrated.Query(new(Source:3),0,false).Totals.Total==500,"Transfer filter");
+    var all=migrated.Query(new(Source:-2),0,false);
+    Check(all.Totals.Total==1200 && all.Buckets.Sum(x=>x.Total)==1200,"All-record graph and totals include gross unknown amount");
+    Check(migrated.Query(new(Source:-2,Quality:2),0,false).Totals.Count==2,"NQ filter excludes non-item outflows");
+    string expenseCsv=Path.Combine(folder,"outflows.csv"); migrated.Export(new(Source:2),expenseCsv);
+    string outflowText=File.ReadAllText(expenseCsv);
+    Check(outflowText.Contains("source,tax_known,seller_name") && outflowText.Contains("\"Unclassified\",\"false\""),"CSV source and tax-known fields");
+    Check(outflowText.Contains("\"\",\"\",\"85\""),"CSV unknown subtotal and tax are blank");
+}
+using(var again=new LedgerStore(legacy)) Check(Directory.GetFiles(folder,"legacy.db.v1-backup-*").Length==1,"Schema2 reopen does not redo migration/backup");
 using(var store=new LedgerStore(dbfile))
 {
     Purchase P(int i,Character? who=null)=>new(i.ToString(),now.AddDays(-(i%400)).ToUnixTimeSeconds(),who??a,42,"試験用アイテム",i%2==0,3,100,15,(10000+i).ToString(),"555",i==0?"=HYPERLINK(\"bad\")":"Seller, \"Name\"",1);

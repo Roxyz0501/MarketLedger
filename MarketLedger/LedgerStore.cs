@@ -14,15 +14,16 @@ public sealed class LedgerStore : IDisposable
     public long PurchaseWrites { get; private set; }
     public long RowsReturned { get; private set; }
     public const int PageSize = 100;
-    private const string Columns = "id,time,cid,character,home,world,item,name,hq,quantity,unit,tax,listing,retainer,seller,city";
+    private const string Columns = "id,time,cid,character,home,world,item,name,hq,quantity,unit,tax,listing,retainer,seller,city,source,tax_known,total";
     public LedgerStore(string path)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
         db = new Sqlite(path);
         try
         {
+            long version;
             using (var v = db.Prepare("PRAGMA user_version"))
-            { v.Step(); if (v.Int(0) > 1) throw new InvalidDataException("Unsupported future ledger schema; no changes made."); }
+            { v.Step(); version=v.Int(0); if (version > 2) throw new InvalidDataException("Unsupported future ledger schema; no changes made."); }
             db.Execute("PRAGMA journal_mode=WAL");
             db.Execute("PRAGMA synchronous=FULL");
             db.Execute("PRAGMA cache_size=-4096");
@@ -31,13 +32,27 @@ public sealed class LedgerStore : IDisposable
             db.Execute("CREATE INDEX IF NOT EXISTS purchase_date ON purchases(time DESC,id DESC)");
             db.Execute("CREATE INDEX IF NOT EXISTS purchase_character_date ON purchases(cid,time DESC,id DESC)");
             db.Execute("CREATE INDEX IF NOT EXISTS purchase_world_date ON purchases(world,time DESC,id DESC)");
-            db.Execute("PRAGMA user_version=1");
+            if(version<2)
+            {
+                if(version==1) db.Execute("VACUUM INTO ?",path+".v1-backup-"+DateTime.UtcNow.ToString("yyyyMMddHHmmss")+"-"+Guid.NewGuid().ToString("N"));
+                db.Execute("BEGIN IMMEDIATE");
+                try
+                {
+                    db.Execute("ALTER TABLE purchases ADD COLUMN source INTEGER NOT NULL DEFAULT 0");
+                    db.Execute("ALTER TABLE purchases ADD COLUMN tax_known INTEGER NOT NULL DEFAULT 1");
+                    db.Execute("CREATE INDEX purchase_source_date ON purchases(source,time DESC,id DESC)");
+                    db.Execute("PRAGMA user_version=2"); db.Execute("COMMIT");
+                }
+                catch { db.Execute("ROLLBACK"); throw; }
+            }
         }
         catch { db.Dispose(); throw; }
     }
     public bool Insert(Purchase p)
     {
-        if (p.Quantity == 0 || p.ItemId == 0 || string.IsNullOrEmpty(p.Character.Id) || p.ListingId == "0") throw new InvalidDataException("Invalid purchase");
+        if (string.IsNullOrEmpty(p.Character.Id) || string.IsNullOrEmpty(p.ListingId) || p.ListingId == "0" || !Enum.IsDefined(p.Source)
+            || p.Total<=0 || (p.Source is ExpenseSource.Market or ExpenseSource.NpcShop && (p.Quantity==0 || p.ItemId==0 || !p.TaxKnown || p.Total!=p.Subtotal+p.Tax))
+            || (!p.TaxKnown && (p.Subtotal!=0 || p.Tax!=0))) throw new InvalidDataException("Invalid purchase");
         lock (gate)
         {
             using (var existing = db.Prepare("SELECT 1 FROM purchases WHERE id=? OR (world=? AND listing=?) LIMIT 1", p.Id,p.Character.World,p.ListingId))
@@ -45,9 +60,9 @@ public sealed class LedgerStore : IDisposable
             db.Execute("BEGIN IMMEDIATE");
             try
             {
-                db.Execute($"INSERT INTO purchases ({Columns},subtotal,total) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                db.Execute($"INSERT INTO purchases ({Columns},subtotal) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     p.Id,p.Time,p.Character.Id,p.Character.Name,p.Character.HomeWorld,p.Character.World,p.ItemId,p.ItemName,p.Hq?1:0,
-                    p.Quantity,p.UnitPrice,p.Tax,p.ListingId,p.RetainerId,p.RetainerName,p.RetainerCity,p.Subtotal,p.Total);
+                    p.Quantity,p.UnitPrice,p.Tax,p.ListingId,p.RetainerId,p.RetainerName,p.RetainerCity,(int)p.Source,p.TaxKnown?1:0,p.Total,p.Subtotal);
                 db.Execute("INSERT INTO characters (cid,name,home) VALUES (?,?,?) ON CONFLICT(cid) DO UPDATE SET name=excluded.name,home=excluded.home WHERE name<>excluded.name OR home<>excluded.home",p.Character.Id,p.Character.Name,p.Character.HomeWorld);
                 db.Execute("COMMIT"); PurchaseWrites++; Interlocked.Increment(ref revision); cache.Clear();
                 return true;
@@ -60,8 +75,10 @@ public sealed class LedgerStore : IDisposable
         var sql = new StringBuilder(" WHERE 1=1"); var args = new List<object>();
         void Add(string clause, object value) { sql.Append(clause); args.Add(value); }
         if (f.CharacterId.Length > 0) Add(" AND cid=?",f.CharacterId);
+        if (f.Source == -1) sql.Append(" AND source IN (0,1)");
+        else if (f.Source >= 0) Add(" AND source=?",f.Source);
         if (f.World.Length > 0) Add(" AND world=? COLLATE NOCASE",f.World);
-        if (f.Quality != 0) Add(" AND hq=?",f.Quality==1 ? 1 : 0);
+        if (f.Quality != 0) { sql.Append(" AND item>0"); Add(" AND hq=?",f.Quality==1 ? 1 : 0); }
         if (f.From > 0) Add(" AND time>=?",f.From);
         if (f.Until > 0) Add(" AND time<?",f.Until);
         if (f.Min > 0) Add(" AND total>=?",f.Min);
@@ -90,11 +107,11 @@ public sealed class LedgerStore : IDisposable
             if (related != null) { totals = related.Totals; buckets.AddRange(related.Buckets); characters.AddRange(related.Characters); }
             else
             {
-                using (var s = db.Prepare("SELECT COUNT(*),COALESCE(SUM(quantity),0),COALESCE(SUM(subtotal),0),COALESCE(SUM(tax),0) FROM purchases"+where,args))
-                { ReadStatements++; s.Step(); totals = new(s.Int(0),s.Int(1),s.Int(2),s.Int(3)); RowsReturned++; }
+                using (var s = db.Prepare("SELECT COUNT(*),COALESCE(SUM(quantity),0),COALESCE(SUM(subtotal),0),COALESCE(SUM(tax),0),COALESCE(SUM(CASE WHEN tax_known=0 THEN total ELSE 0 END),0) FROM purchases"+where,args))
+                { ReadStatements++; s.Step(); totals = new(s.Int(0),s.Int(1),s.Int(2),s.Int(3),s.Int(4)); RowsReturned++; }
                 string bucket = monthly ? "substr(ledger_day(time),1,7)" : "ledger_day(time)";
-                using (var s = db.Prepare($"SELECT {bucket} AS bucket,SUM(subtotal),SUM(tax) FROM purchases{where} GROUP BY bucket ORDER BY bucket DESC LIMIT 366",args))
-                { ReadStatements++; while(s.Step()) { buckets.Add(new(s.Text(0),s.Int(1),s.Int(2))); RowsReturned++; } }
+                using (var s = db.Prepare($"SELECT {bucket} AS bucket,SUM(subtotal),SUM(tax),SUM(CASE WHEN tax_known=0 THEN total ELSE 0 END) FROM purchases{where} GROUP BY bucket ORDER BY bucket DESC LIMIT 366",args))
+                { ReadStatements++; while(s.Step()) { buckets.Add(new(s.Text(0),s.Int(1),s.Int(2),s.Int(3))); RowsReturned++; } }
                 buckets.Reverse();
                 using (var s = db.Prepare("SELECT cid,name,home FROM characters ORDER BY name LIMIT 1000"))
                 { ReadStatements++; while(s.Step()) { characters.Add(new(s.Text(0),s.Text(1),s.Text(2),"")); RowsReturned++; } }
@@ -107,7 +124,8 @@ public sealed class LedgerStore : IDisposable
         }
     }
     private static Purchase Read(Sqlite.Statement s) => new(s.Text(0),s.Int(1),new(s.Text(2),s.Text(3),s.Text(4),s.Text(5)),
-        (uint)s.Int(6),s.Text(7),s.Int(8)!=0,(uint)s.Int(9),(uint)s.Int(10),(uint)s.Int(11),s.Text(12),s.Text(13),s.Text(14),(int)s.Int(15));
+        (uint)s.Int(6),s.Text(7),s.Int(8)!=0,(uint)s.Int(9),(uint)s.Int(10),(uint)s.Int(11),s.Text(12),s.Text(13),s.Text(14),(int)s.Int(15),
+        (ExpenseSource)s.Int(16),s.Int(17)==0?s.Int(18):null,s.Int(17)!=0);
     public static string CsvCell(string text)
     {
         // Spreadsheet formula injection protection, including leading whitespace and control characters.
@@ -130,14 +148,14 @@ public sealed class LedgerStore : IDisposable
                 using (var s = db.Prepare($"SELECT {Columns} FROM purchases{where} ORDER BY {Order(filter)}",args))
                 {
                     ReadStatements++;
-                    writer.WriteLine("purchased_at_utc,purchased_at_local,character_id,character,home_world,purchase_world,item_id,item_name,hq,quantity,unit_price,subtotal,tax,total,listing_id,retainer_id,retainer_name,retainer_city_id");
+                    writer.WriteLine("purchased_at_utc,purchased_at_local,character_id,character,home_world,purchase_world,item_id,item_name,hq,quantity,unit_price,subtotal,tax,total,listing_id,retainer_id,retainer_name,retainer_city_id,source,tax_known,seller_name");
                     while(s.Step())
                     {
                         cancellation.ThrowIfCancellationRequested();
                         var p = Read(s); var t = DateTimeOffset.FromUnixTimeSeconds(p.Time);
                         string[] cells = [t.ToString("O"),t.ToLocalTime().ToString("O"),p.Character.Id,p.Character.Name,p.Character.HomeWorld,p.Character.World,
-                            p.ItemId.ToString(),p.ItemName,p.Hq?"true":"false",p.Quantity.ToString(),p.UnitPrice.ToString(),p.Subtotal.ToString(CultureInfo.InvariantCulture),
-                            p.Tax.ToString(),p.Total.ToString(CultureInfo.InvariantCulture),p.ListingId,p.RetainerId,p.RetainerName,p.RetainerCity.ToString()];
+                            p.ItemId==0?"":p.ItemId.ToString(),p.ItemName,p.ItemId==0?"":p.Hq?"true":"false",p.Quantity==0?"":p.Quantity.ToString(),p.Quantity==0?"":p.UnitPrice.ToString(),p.TaxKnown?p.Subtotal.ToString(CultureInfo.InvariantCulture):"",
+                            p.TaxKnown?p.Tax.ToString():"",p.Total.ToString(CultureInfo.InvariantCulture),p.Source==ExpenseSource.Market?p.ListingId:"",p.RetainerId,p.Source==ExpenseSource.Market?p.RetainerName:"",p.RetainerCity==0?"":p.RetainerCity.ToString(),p.Source.ToString(),p.TaxKnown?"true":"false",p.RetainerName];
                         writer.WriteLine(string.Join(',',cells.Select(CsvCell))); count++; RowsReturned++;
                     }
                 }

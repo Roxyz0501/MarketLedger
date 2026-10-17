@@ -17,7 +17,7 @@ unsafe class Program
         string output=Path.GetFullPath(args[0]); Directory.CreateDirectory(output); Dummy.Directory=Path.Combine(output,"data");
         ImGui.CreateContext(); var io=ImGui.GetIO(); io.DisplaySize=new(1440,900); io.DeltaTime=1f/60;
         io.ConfigInputTrickleEventQueue=false; io.IniFilename=null;
-        using(var plugin=new Plugin(Stub<IDalamudPluginInterface>(),Stub<ICommandManager>(),Stub<IFramework>(),Stub<IClientState>(),Stub<IPlayerState>(),Stub<IMarketBoard>(),Stub<IDataManager>(),Stub<IPluginLog>()))
+        using(var plugin=new Plugin(Stub<IDalamudPluginInterface>(),Stub<ICommandManager>(),Stub<IFramework>(),Stub<IClientState>(),Stub<IPlayerState>(),Stub<IMarketBoard>(),Stub<IDataManager>(),Stub<IPluginLog>(),Stub<IGameInventory>(),Stub<IGameInteropProvider>()))
         {
             var type=typeof(Plugin);
             object? Invoke(string method,params object?[] values)=>type.GetMethod(method,BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(plugin,values);
@@ -26,6 +26,8 @@ unsafe class Program
             var store=(LedgerStore)Get("store")!;
             var actor=new Character("1001","Sample Adventurer","Chocobo","Chocobo");
             for(int i=0;i<24;i++) store.Insert(new(i.ToString(),DateTimeOffset.Now.AddDays(-i).ToUnixTimeSeconds(),actor,(uint)(100+i),i%2==0?"試験用クリスタル":"サンプル素材",i%3==0,(uint)(i+1),(uint)(100+i*97),(uint)(5+i*4),(100+i).ToString(),"2001",i%4==0?"":"Sample Retainer",1));
+            store.Insert(new("npc-sample",DateTimeOffset.Now.ToUnixTimeSeconds(),actor,500,"サンプル素材",false,3,120,0,"npc:sample","","Sample Shop",0,ExpenseSource.NpcShop));
+            store.Insert(new("unknown-sample",DateTimeOffset.Now.ToUnixTimeSeconds(),actor,0,"",false,0,0,0,"outflow:sample","","",0,ExpenseSource.Unclassified,333,false));
             var result=store.Query(new(),0,false);
             Set("filter",new Filter()); Set("from",""); Set("result",result); Set("dirty",false); Set("requestedRevision",store.Revision);
             Invoke("UpdateFonts",string.Concat(result.Rows.Select(x=>x.ItemName+x.Character.Name+x.Character.World+x.RetainerName)));
@@ -40,7 +42,8 @@ unsafe class Program
             }
             void Frame() { ImGui.NewFrame(); Invoke("Draw"); ImGui.Render(); }
             void Click(float x,float y) { io.AddMousePosEvent(x,y); Frame(); io.AddMouseButtonEvent(0,true); Frame(); io.AddMouseButtonEvent(0,false); Frame(); Frame(); }
-            Dummy.Commands["/marketledger"].Handler("/marketledger",""); Frame(); Frame();
+            Check(Dummy.Commands.ContainsKey("/gilledger"),"Renamed command registered");
+            Dummy.Commands["/gilledger"].Handler("/gilledger",""); Frame(); Frame();
             long reads=store.ReadStatements,writes=store.PurchaseWrites; int saves=Dummy.Saves;
             foreach(string code in Loc.Codes)
             {
@@ -50,7 +53,19 @@ unsafe class Program
             }
             Check(store.ReadStatements==reads && store.PurchaseWrites==writes,"Rendering makes zero DB reads/writes");
             Check(Dummy.Saves==saves,"Drawing does not save config");
-            Dummy.Config.Language="ja"; Frame(); Frame(); Click(155,100); Frame();
+            Dummy.Config.Language="ja";
+            Set("source",1); Invoke("Apply");
+            Check(((Filter)Get("filter")!).Source==1,"NPC source filter applied");
+            var npcResult=store.Query((Filter)Get("filter")!,0,false);
+            Check(npcResult.Rows.Count==1 && npcResult.Rows[0].Source==ExpenseSource.NpcShop,"NPC filter contains only shop purchase");
+            Set("result",npcResult); Set("dirty",false); Frame(); Frame();
+            Renderer.Render(ImGui.GetDrawData(),textures,Path.Combine(output,"ja-npc.bmp"));
+            Set("source",-2); Invoke("Apply");
+            var allResult=store.Query((Filter)Get("filter")!,0,false);
+            Check(allResult.Totals.UnknownTaxTotal==333,"Unknown tax retained in all-outflows view");
+            Set("result",allResult); Set("dirty",false); Frame(); Frame();
+            Renderer.Render(ImGui.GetDrawData(),textures,Path.Combine(output,"ja-all.bmp"));
+            Click(155,124); Frame();
             Renderer.Render(ImGui.GetDrawData(),textures,Path.Combine(output,"ja-charts.bmp"));
             // Exercise chart rendering directly in a native window independently of tab hit coordinates.
             ImGui.NewFrame(); ImGui.SetNextWindowSize(new(1100,760)); ImGui.Begin("Chart QA");
@@ -65,6 +80,7 @@ unsafe class Program
             Check(Dummy.Saves==saves,"Search and invalid filters have zero config writes");
         }
         Check(!Dummy.Commands.ContainsKey("/marketledger"),"Dispose removes command");
+        Check(!Dummy.Commands.ContainsKey("/gilledger"),"Dispose removes renamed command");
         Check(Dummy.Subscriptions==0,"Dispose unsubscribes all events");
         ImGui.DestroyContext(); foreach(var pin in Dummy.Pins) pin.Free();
         Console.WriteLine($"PASS: {checks} native ImGui/glyph/lifecycle/access checks. Screenshots: {output}");

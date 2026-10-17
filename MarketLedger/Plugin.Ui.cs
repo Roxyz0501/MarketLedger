@@ -10,7 +10,8 @@ public sealed partial class Plugin
 {
     private Filter filter = new();
     private string selectedCharacter="",search="",world="",from="",until="",min="",max="";
-    private int quality,sort,page,metric;
+    private int quality,sort,page,metric,source=-1;
+    private static readonly (int Value,string Key)[] Sources=[(-1,"Confirmed"),(0,"Market"),(1,"NpcShop"),(2,"Unclassified"),(3,"Transfer"),(-2,"AllOutflows")];
     private bool monthly,cumulative,dirty=true,dateError,readError,exportError,forceRefresh,recoveryError;
     private long requestedRevision=-1;
     private QueryResult? result;
@@ -67,15 +68,17 @@ public sealed partial class Plugin
         using var font=fonts[face].Push();
         ImGui.SetNextWindowSize(new Vector2(1320,800),ImGuiCond.FirstUseEver);
         bool visible=open;
-        if(ImGui.Begin("Market Ledger###MarketLedger",ref visible))
+        if(ImGui.Begin("Gil Ledger###MarketLedger",ref visible))
         {
             if(!config.Recording) ImGui.TextColored(new Vector4(1,.65f,.2f,1),T("Paused"));
+            if(!npcShop.Available) ImGui.TextWrapped(T("NpcUnavailable"));
             if(!failed.IsEmpty)
             {
                 ImGui.TextColored(new Vector4(1,.4f,.3f,1),T("WriteError"));
                 if(ImGui.Button(T("Retry")+"###RetrySave")) RetryWrites();
             }
             if(tracker.Unmatched>0) ImGui.TextDisabled($"{T("Unmatched")}: {tracker.Unmatched}");
+            if(spending.Overflow>0) ImGui.TextWrapped(T("Overflow"));
             if(ImGui.BeginTabBar("MainTabs"))
             {
                 if(ImGui.BeginTabItem(T("History")+"###History"))
@@ -95,7 +98,7 @@ public sealed partial class Plugin
     }
     private void DrawFilters()
     {
-        if(ImGui.BeginTable("Filters",3,ImGuiTableFlags.SizingStretchSame))
+        if(ImGui.BeginTable("Filters",4,ImGuiTableFlags.SizingStretchSame))
         {
             ImGui.TableNextColumn();
             ImGui.TextUnformatted(T("Character")); ImGui.SetNextItemWidth(-1);
@@ -108,6 +111,10 @@ public sealed partial class Plugin
                 foreach(var c in result?.Characters ?? []) if(ImGui.Selectable($"{c.Name} @ {c.HomeWorld}##{c.Id}",c.Id==selectedCharacter)) selectedCharacter=c.Id;
                 ImGui.EndCombo();
             }
+            ImGui.TableNextColumn();
+            ImGui.TextUnformatted(T("Source")); ImGui.SetNextItemWidth(-1);
+            if(ImGui.BeginCombo("###Source",T(Sources.First(x=>x.Value==source).Key)))
+            { foreach(var option in Sources) if(ImGui.Selectable(T(option.Key)+"###Source"+option.Value,source==option.Value)) source=option.Value; ImGui.EndCombo(); }
             ImGui.TableNextColumn(); Input("Search",ref search,160);
             ImGui.TableNextColumn(); Input("World",ref world,64);
             ImGui.TableNextColumn(); Input("From",ref from,10);
@@ -126,12 +133,13 @@ public sealed partial class Plugin
         }
         if(ImGui.Button(T("Apply")+"###Apply")) Apply(); ImGui.SameLine();
         if(ImGui.Button(T("Refresh")+"###Refresh")) { forceRefresh=true; dirty=true; } ImGui.SameLine();
-        if(ImGui.Button(T("Reset")+"###Reset")) { selectedCharacter=""; search=world=from=until=min=max=""; quality=sort=0; Apply(); }
+        if(ImGui.Button(T("Reset")+"###Reset")) { selectedCharacter=""; search=world=from=until=min=max=""; quality=sort=0; source=-1; Apply(); }
         ImGui.SameLine(); if(ImGui.Button(T("Today")+"###Today")) { from=until=DateTime.Today.ToString("yyyy-MM-dd"); Apply(); }
         ImGui.SameLine(); if(ImGui.Button(T("Month")+"###Month")) { from=new DateTime(DateTime.Today.Year,DateTime.Today.Month,1).ToString("yyyy-MM-dd"); until=DateTime.Today.ToString("yyyy-MM-dd"); Apply(); }
         ImGui.SameLine(); if(ImGui.Button(T("Last30")+"###Last30")) { from=DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd"); until=DateTime.Today.ToString("yyyy-MM-dd"); Apply(); }
         ImGui.SameLine(); if(ImGui.Button(T("AllTime")+"###AllTime")) { from=until=""; Apply(); }
         ImGui.TextWrapped(T("Applied"));
+        ImGui.TextWrapped(T("SourceHelp"));
         if(dateError) ImGui.TextColored(new Vector4(1,.4f,.3f,1),T("DateError"));
     }
     private void Input(string key,ref string value,int length)
@@ -151,7 +159,7 @@ public sealed partial class Plugin
             long Amount(string text)=>string.IsNullOrWhiteSpace(text)?0:long.Parse(text,NumberStyles.None,CultureInfo.InvariantCulture);
             long f=Date(from,false),u=Date(until,true),lo=Amount(min),hi=Amount(max);
             if(f<0 || u<0 || (u!=0 && f>=u) || lo<0 || hi<0 || (hi!=0 && lo>hi)) throw new FormatException();
-            var next=new Filter(selectedCharacter,search.Trim(),world.Trim(),quality,f,u,lo,hi,sort);
+            var next=new Filter(selectedCharacter,search.Trim(),world.Trim(),quality,f,u,lo,hi,sort,source);
             if(next!=filter || page!=0) { filter=next; page=0; result=null; dirty=true; }
             dateError=false;
         }
@@ -165,6 +173,7 @@ public sealed partial class Plugin
         if(result is not { } r) return;
         ImGui.TextUnformatted($"{T("Count")}: {r.Totals.Count:N0}     {T("Quantity")}: {r.Totals.Quantity:N0}");
         ImGui.TextUnformatted($"{T("Subtotal")}: {r.Totals.Subtotal:N0}     {T("Tax")}: {r.Totals.Tax:N0}     {T("Total")}: {r.Totals.Total:N0} gil");
+        if(r.Totals.UnknownTaxTotal>0) ImGui.TextWrapped($"{T("UnknownTaxTotal")}: {r.Totals.UnknownTaxTotal:N0} gil");
     }
     private void DrawExport()
     {
@@ -175,7 +184,7 @@ public sealed partial class Plugin
             exportTask=Task.Run(()=>
             {
                 string folder=Path.Combine(directory,"exports"); Directory.CreateDirectory(folder);
-                string file=Path.Combine(folder,$"MarketLedger-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.csv");
+                string file=Path.Combine(folder,$"GilLedger-{DateTime.Now:yyyyMMdd-HHmmss}-{Guid.NewGuid().ToString("N")[..8]}.csv");
                 store.Export(captured,file,shutdown.Token); return file;
             });
         }
@@ -195,10 +204,10 @@ public sealed partial class Plugin
         ImGui.BeginDisabled((long)(page+1)*LedgerStore.PageSize>=r.Totals.Count);
         if(ImGui.Button(T("Next")+"###Next")) { page++; dirty=true; result=null; }
         ImGui.EndDisabled();
-        if(ImGui.BeginTable("Purchases",10,ImGuiTableFlags.Borders|ImGuiTableFlags.RowBg|ImGuiTableFlags.ScrollY|ImGuiTableFlags.ScrollX|ImGuiTableFlags.Resizable,new Vector2(0,Math.Max(120,ImGui.GetContentRegionAvail().Y))))
+        if(ImGui.BeginTable("Purchases",11,ImGuiTableFlags.Borders|ImGuiTableFlags.RowBg|ImGuiTableFlags.ScrollY|ImGuiTableFlags.ScrollX|ImGuiTableFlags.Resizable,new Vector2(0,Math.Max(120,ImGui.GetContentRegionAvail().Y))))
         {
-            string[] headers=["Time","Character","Item","Retainer","Quantity","Unit","Subtotal","Tax","Total","World"];
-            float[] widths=[155,160,205,145,55,90,85,65,95,90];
+            string[] headers=["Time","Source","Character","Item","Seller","Quantity","Unit","Subtotal","Tax","Total","World"];
+            float[] widths=[155,100,160,205,145,55,90,85,65,95,90];
             for(int i=0;i<headers.Length;i++) ImGui.TableSetupColumn(T(headers[i])+"###"+headers[i],ImGuiTableColumnFlags.WidthFixed,widths[i]);
             ImGui.TableSetupScrollFreeze(0,1);
             ImGui.TableNextRow(ImGuiTableRowFlags.Headers);
@@ -207,12 +216,13 @@ public sealed partial class Plugin
             {
                 ImGui.TableNextRow();
                 Cell(DateTimeOffset.FromUnixTimeSeconds(p.Time).ToLocalTime().ToString("yyyy-MM-dd HH:mm:ss"));
+                Cell(T(p.Source.ToString()));
                 Cell(p.Character.Name+" @ "+p.Character.HomeWorld);
-                Cell(p.ItemName+(p.Hq?" [HQ]":""));
+                Cell(p.ItemId==0?T(p.Source.ToString()):p.ItemName+(p.Hq?" [HQ]":""));
                 if(ImGui.IsItemHovered()) ImGui.SetTooltip($"{p.ItemName}\nID: {p.ItemId}");
                 Cell(p.RetainerName.Length>0?p.RetainerName:T("Unknown"));
                 if(ImGui.IsItemHovered()) ImGui.SetTooltip($"{p.RetainerName}\nID: {p.RetainerId}");
-                Cell(p.Quantity.ToString("N0")); Cell(p.UnitPrice.ToString("N0")); Cell(p.Subtotal.ToString("N0")); Cell(p.Tax.ToString("N0")); Cell(p.Total.ToString("N0"));
+                Cell(p.Quantity==0?"—":p.Quantity.ToString("N0")); Cell(p.Quantity==0?"—":p.UnitPrice.ToString("N0")); Cell(p.TaxKnown?p.Subtotal.ToString("N0"):"—"); Cell(p.TaxKnown?p.Tax.ToString("N0"):"—"); Cell(p.Total.ToString("N0"));
                 Cell(p.Character.World);
             }
             ImGui.EndTable();
@@ -232,7 +242,7 @@ public sealed partial class Plugin
         if(result is not { } r || r.Buckets.Count==0) { ImGui.TextWrapped(T("NoData")); return; }
         // At most 366 bars/points; no database work or full-history enumeration during rendering.
         long running=0;
-        long[] values=r.Buckets.Select(b=> { long v=metric switch {1=>b.Subtotal,2=>b.Tax,_=>b.Subtotal+b.Tax}; running+=v; return cumulative?running:v; }).ToArray();
+        long[] values=r.Buckets.Select(b=> { long v=metric switch {1=>b.Subtotal,2=>b.Tax,_=>b.Total}; running+=v; return cumulative?running:v; }).ToArray();
         var start=ImGui.GetCursorScreenPos();
         var size=new Vector2(Math.Max(200,ImGui.GetContentRegionAvail().X),200);
         ImGui.InvisibleButton("###Graph",size);
@@ -256,14 +266,14 @@ public sealed partial class Plugin
         {
             foreach(string key in new[]{"Time","Subtotal","Tax","Total"}) ImGui.TableSetupColumn(T(key));
             ImGui.TableSetupScrollFreeze(0,1); ImGui.TableHeadersRow();
-            foreach(var b in r.Buckets.Reverse()) { ImGui.TableNextRow(); Cell(b.Date); Cell(b.Subtotal.ToString("N0")); Cell(b.Tax.ToString("N0")); Cell((b.Subtotal+b.Tax).ToString("N0")); }
+            foreach(var b in r.Buckets.Reverse()) { ImGui.TableNextRow(); Cell(b.Date); Cell(b.Subtotal.ToString("N0")); Cell(b.Tax.ToString("N0")); Cell(b.Total.ToString("N0")); }
             ImGui.EndTable();
         }
     }
     private void DrawSettings()
     {
         bool recording=config.Recording;
-        if(ImGui.Checkbox(T("Recording")+"###Recording",ref recording)) { config.Recording=recording; tracker.Clear(); Save(); }
+        if(ImGui.Checkbox(T("Recording")+"###Recording",ref recording)) { DrainSpending(DateTimeOffset.UtcNow,true); config.Recording=recording; tracker.Clear(); spending.Clear(); inventoryReadyAt=DateTimeOffset.UtcNow.AddSeconds(2); Save(); }
         ImGui.TextWrapped(T("Limitations")); ImGui.Spacing(); ImGui.TextWrapped(T("LocalOnly"));
         if(recoveryFiles.Length>0)
         {

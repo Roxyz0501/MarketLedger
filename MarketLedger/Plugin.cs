@@ -19,6 +19,9 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly IClientState client;
     private readonly IPlayerState player;
     private readonly IMarketBoard market;
+    private readonly IGameInventory inventory;
+    private readonly NpcShopObserver npcShop;
+    private readonly SpendingTracker spending=new();
     private readonly IDataManager data;
     private readonly IPluginLog log;
     private readonly Configuration config;
@@ -40,10 +43,11 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly ConcurrentDictionary<uint,string> itemNames = new();
 
     public Plugin(IDalamudPluginInterface pi,ICommandManager commands,IFramework framework,IClientState client,
-        IPlayerState player,IMarketBoard market,IDataManager data,IPluginLog log)
+        IPlayerState player,IMarketBoard market,IDataManager data,IPluginLog log,IGameInventory inventory,IGameInteropProvider interop)
     {
         this.pi=pi; this.commands=commands; this.framework=framework; this.client=client;
         this.player=player; this.market=market; this.data=data; this.log=log;
+        this.inventory=inventory;
         config=pi.GetPluginConfig() as Configuration ?? new();
         string? game;
         try { game=client.ClientLanguage.ToString() switch {"Japanese"=>"ja","English"=>"en","German"=>"de","French"=>"fr",_=>null}; }
@@ -62,6 +66,9 @@ public sealed partial class Plugin : IDalamudPlugin
         UpdateFonts("");
         commandInfo=new CommandInfo((_,_)=>Open()) {HelpMessage=T("CommandHelp")};
         commands.AddHandler("/marketledger",commandInfo);
+        commands.AddHandler("/gilledger",commandInfo);
+        npcShop=new NpcShopObserver(interop,spending.Request,()=>config.Recording && !disposed?actor:null,log);
+        inventory.InventoryChangedRaw+=OnInventory;
         framework.Update+=OnUpdate;
         market.OfferingsReceived+=OnOfferings;
         market.PurchaseRequested+=OnRequested;
@@ -75,13 +82,27 @@ public sealed partial class Plugin : IDalamudPlugin
     private void Save()=>pi.SavePluginConfig(config);
     private void RefreshActor()
     {
+        ulong id=client.IsLoggedIn && player.IsLoaded?player.ContentId:0;
+        uint worldId=id!=0?player.CurrentWorld.RowId:0;
+        if(actorId==id && actorWorld==worldId) return;
         Character? next=null;
-        if(client.IsLoggedIn && player.IsLoaded && player.ContentId!=0)
+        if(id!=0)
             next=new(player.ContentId.ToString(),player.CharacterName,player.HomeWorld.Value.Name.ToString(),player.CurrentWorld.Value.Name.ToString());
-        if(actor?.Id!=next?.Id || actor?.World!=next?.World) tracker.Clear();
+        if(actor?.Id!=next?.Id || actor?.World!=next?.World)
+        {
+            tracker.Clear(); DrainSpending(DateTimeOffset.UtcNow,true); spending.Clear();
+            inventoryReadyAt=DateTimeOffset.UtcNow.AddSeconds(2);
+        }
+        actorId=id; actorWorld=worldId;
         if(actor!=next) actor=next;
     }
-    private void OnUpdate(IFramework _) { if(!disposed) RefreshActor(); }
+    private void OnUpdate(IFramework _)
+    {
+        if(disposed) return;
+        RefreshActor();
+        var now=DateTimeOffset.UtcNow;
+        if(spending.HasPending && now>=nextDrain) { nextDrain=now.AddMilliseconds(250); DrainSpending(now); }
+    }
     private void OnOfferings(IMarketBoardCurrentOfferings offers)
     {
         if(!config.Recording || actor==null || disposed) return;
@@ -102,6 +123,7 @@ public sealed partial class Plugin : IDalamudPlugin
             name=itemNames.GetOrAdd(item,id=>data.GetExcelSheet<Item>().GetRowOrDefault(id)?.Name.ToString() ?? id.ToString());
         }
         catch { name=item.ToString(); }
+        spending.MarketRequested(request.ListingId.ToString(),who,DateTimeOffset.UtcNow);
         tracker.Request(new(request.ListingId,request.RetainerId,item,request.IsHq,request.ItemQuantity,
             request.PricePerUnit,request.TotalTax,request.RetainerCityId,who,name,DateTimeOffset.UtcNow));
     }
@@ -110,7 +132,8 @@ public sealed partial class Plugin : IDalamudPlugin
         if(!config.Recording || disposed) return;
         var result=tracker.Confirm(purchase.CatalogId,purchase.ItemQuantity,actor,DateTimeOffset.UtcNow);
         if(result==null) return;
-        if(!writes.Writer.TryWrite(result)) RecordFailure(result);
+        spending.Known(result,DateTimeOffset.UtcNow);
+        QueuePurchase(result);
     }
     private async Task WriteLoop()
     {
@@ -123,7 +146,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void RecordFailure(Purchase purchase)
     {
         failed.Enqueue(purchase); open=true;
-        if(failed.Count>=256) { config.Recording=false; tracker.Clear(); }
+        if(failed.Count>=256) { config.Recording=false; tracker.Clear(); spending.Clear(); }
     }
     private void Recover()
     {
@@ -165,11 +188,14 @@ public sealed partial class Plugin : IDalamudPlugin
     public void Dispose()
     {
         disposed=true;
+        npcShop.Dispose(); inventory.InventoryChangedRaw-=OnInventory;
         market.OfferingsReceived-=OnOfferings; market.PurchaseRequested-=OnRequested; market.ItemPurchased-=OnPurchased;
         framework.Update-=OnUpdate;
         commands.RemoveHandler("/marketledger");
+        commands.RemoveHandler("/gilledger");
         pi.UiBuilder.Draw-=Draw; pi.UiBuilder.OpenMainUi-=Open; pi.UiBuilder.OpenConfigUi-=Open;
         shutdown.Cancel();
+        DrainSpending(DateTimeOffset.UtcNow,true);
         writes.Writer.TryComplete();
         writer.GetAwaiter().GetResult();
         try { queryTask?.GetAwaiter().GetResult(); exportTask?.GetAwaiter().GetResult(); } catch { }

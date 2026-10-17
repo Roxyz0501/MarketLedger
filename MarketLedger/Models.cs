@@ -1,28 +1,33 @@
 namespace MarketLedger;
 
 public sealed record Character(string Id, string Name, string HomeWorld, string World);
+public enum ExpenseSource { Market = 0, NpcShop = 1, Unclassified = 2, Transfer = 3 }
 public sealed record Purchase(string Id, long Time, Character Character, uint ItemId, string ItemName,
     bool Hq, uint Quantity, uint UnitPrice, uint Tax, string ListingId, string RetainerId,
-    string RetainerName, int RetainerCity)
+    string RetainerName, int RetainerCity, ExpenseSource Source = ExpenseSource.Market,
+    long? PaidAmount = null, bool TaxKnown = true)
 {
     public long Subtotal => checked((long)Quantity * UnitPrice);
-    public long Total => checked(Subtotal + Tax);
+    public long Total => PaidAmount ?? checked(Subtotal + Tax);
 }
 public sealed record Listing(ulong Id, ulong RetainerId, uint ItemId, bool Hq, uint Quantity,
     uint Price, string RetainerName, DateTimeOffset Received);
 public sealed record PurchaseRequest(ulong ListingId, ulong RetainerId, uint ItemId, bool Hq,
     uint Quantity, uint Price, uint Tax, int City, Character Character, string ItemName, DateTimeOffset Time);
 public sealed record Filter(string CharacterId = "", string Search = "", string World = "",
-    int Quality = 0, long From = 0, long Until = 0, long Min = 0, long Max = 0, int Sort = 0);
-public sealed record Totals(long Count, long Quantity, long Subtotal, long Tax)
+    int Quality = 0, long From = 0, long Until = 0, long Min = 0, long Max = 0, int Sort = 0, int Source = -1);
+public sealed record Totals(long Count, long Quantity, long Subtotal, long Tax, long UnknownTaxTotal = 0)
 {
-    public long Total => checked(Subtotal + Tax);
+    public long Total => checked(Subtotal + Tax + UnknownTaxTotal);
 }
-public sealed record Bucket(string Date, long Subtotal, long Tax);
+public sealed record Bucket(string Date, long Subtotal, long Tax, long UnknownTaxTotal = 0)
+{
+    public long Total => checked(Subtotal + Tax + UnknownTaxTotal);
+}
 public sealed record QueryResult(IReadOnlyList<Purchase> Rows, Totals Totals, IReadOnlyList<Bucket> Buckets,
     IReadOnlyList<Character> Characters, long Revision, int Page);
 
-// No native hooks and no guessed tax rates. Only a matched server confirmation commits a request.
+// Market transactions use matched server confirmations and reported taxes, never guessed tax rates.
 public sealed class PurchaseTracker
 {
     private readonly object gate = new();

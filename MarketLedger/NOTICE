@@ -1,8 +1,12 @@
-Market Ledger — Copyright 2026 Roxyz0501 — MIT
+Gil Ledger (formerly Market Ledger) — Copyright 2026 Roxyz0501 — MIT
 
 This is a new independently developed plugin, classified by the user on 2026-10-18.
 It uses the public Dalamud IMarketBoard purchase/request/offering API (goatcorp,
 AGPL-3.0): https://github.com/goatcorp/Dalamud
+It also uses Dalamud IGameInventory.InventoryChangedRaw and the host-provided
+FFXIVClientStructs ShopEventHandler.ExecuteBuy / shop-state API, maintained by
+aers and contributors, MIT: https://github.com/aers/FFXIVClientStructs
+No FFXIVClientStructs source or binary is redistributed.
 No upstream plugin repository or market implementation has been copied.
 Dalamud and its bindings are host dependencies, not redistributed in this ZIP.
 The shared StandardPluginTabs.cs implementation is copied exactly from the

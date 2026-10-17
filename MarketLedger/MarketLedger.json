@@ -1,9 +1,9 @@
 {
-  "Author": "Roxyz0501", "Name": "Market Ledger", "InternalName": "MarketLedger",
+  "Author": "Roxyz0501", "Name": "Gil Ledger", "InternalName": "MarketLedger",
   "RepoUrl": "https://github.com/Roxyz0501/MarketLedger",
   "IconUrl": "https://raw.githubusercontent.com/Roxyz0501/MarketLedger/main/MarketLedger/images/icon.png",
-  "Punchline": "Your market purchases, sellers and gil spending in one ledger.",
-  "Description": "Record confirmed market purchases per character. Search items and retainers, filter by date, world, quality and amount, chart spending before and after tax, and export CSV. Local storage only. Records purchases made while enabled; earlier purchases cannot be recovered. /marketledger",
+  "Punchline": "Track market and NPC purchases, gil spending, sellers and taxes.",
+  "Description": "Gil Ledger (formerly Market Ledger) records confirmed market and ordinary gil-shop purchases per character. Filter by source, character, dates, item, seller, quality and amount; chart spending and export CSV. Unclassified gil decreases and observed transfers are kept separately and excluded from purchase totals by default. Preserves Market Ledger history and settings. /gilledger (also /marketledger). Public preview: live-game acceptance remains unverified.",
   "ApplicableVersion": "any", "DalamudApiLevel": 15,
-  "Tags": ["market", "history", "gil", "retainer", "csv"]
+  "Tags": ["market", "npc", "shop", "history", "gil", "retainer", "csv"]
 }
