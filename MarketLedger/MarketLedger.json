@@ -1,0 +1,9 @@
+{
+  "Author": "Roxyz0501", "Name": "Market Ledger", "InternalName": "MarketLedger",
+  "RepoUrl": "https://github.com/Roxyz0501/MarketLedger",
+  "IconUrl": "https://raw.githubusercontent.com/Roxyz0501/MarketLedger/main/MarketLedger/images/icon.png",
+  "Punchline": "Your market purchases, sellers and gil spending in one ledger.",
+  "Description": "Record confirmed market purchases per character. Search items and retainers, filter by date, world, quality and amount, chart spending before and after tax, and export CSV. Local storage only. Records purchases made while enabled; earlier purchases cannot be recovered. /marketledger",
+  "ApplicableVersion": "any", "DalamudApiLevel": 15,
+  "Tags": ["market", "history", "gil", "retainer", "csv"]
+}

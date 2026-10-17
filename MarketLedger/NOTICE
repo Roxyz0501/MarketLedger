@@ -1,0 +1,16 @@
+Market Ledger — Copyright 2026 Roxyz0501 — MIT
+
+This is a new independently developed plugin, classified by the user on 2026-10-18.
+It uses the public Dalamud IMarketBoard purchase/request/offering API (goatcorp,
+AGPL-3.0): https://github.com/goatcorp/Dalamud
+No upstream plugin repository or market implementation has been copied.
+Dalamud and its bindings are host dependencies, not redistributed in this ZIP.
+The shared StandardPluginTabs.cs implementation is copied exactly from the
+Roxyz0501 workspace template. Language labels and font-atlas usage were informed
+by the author's BaitBeacon project: https://github.com/Roxyz0501/BaitBeacon
+Only selected shared UI behavior is reused; Market Ledger's purchase tracking,
+storage, search, export and charts are independently implemented here.
+
+SQLite is provided by Windows winsqlite3.dll; no SQLite binary is bundled.
+The Noto Sans CJK font is provided by Dalamud (SIL Open Font License 1.1);
+no font files or game artwork are bundled. The icon is original geometric art.
