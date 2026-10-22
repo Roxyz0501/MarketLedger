@@ -1,5 +1,16 @@
 # Publication state
 
+## 2026-10-23 — Gil Ledger 1.2.0.0 published
+
+- Release: https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.0
+- ZIP: https://github.com/Roxyz0501/MarketLedger/releases/download/v1.2.0.0/MarketLedger-1.2.0.0.zip
+- Source/tag: `cc3793df009677db862e0134db7771742a66e3f3`; ZIP 143,099 bytes, 11 allowlisted files; SHA-256 `0A111290BB2269A05B361BE3A3B0DCEB1A6CF98A035DB5CF98D6AA4901ABA017`.
+- Changed-only 60-second settings saves, three valid backups and recovery, logout/Dispose flush, incremental daily transaction archive, canonical HistoryFiles tab and bounded retries/manual recovery. Existing SQLite reader compatibility and all-date queries retained.
+- 4,241 synthetic/core/native-ImGui lifecycle checks passed; Release build zero warnings/errors. Live-game purchase detection/lifecycle and physical SSD writes remain unverified. Published as a public preview. No installed DLL replacement or production migration performed.
+- Anonymous repository/icon HTTP200 (image/png), downloaded ZIP hash and 11-file manifest verified. Shared index commit `edd0dcc20835a705bea9dae6853a93c5ccc97fef`: pinned and normal main URLs both verified at 1.2.0.0; all 12 other entries preserved.
+- User explicitly requested publication. GitHub connector used for source/index/state; CLI only for unsupported Release/assets and local Git synchronization.
+
+
 ## 2026-10-22 — Local persistence implementation (not published)
 
 - Implemented the audit follow-up in this original task folder: changed-only 60-second settings saves, three valid backups, corruption recovery, date-partitioned immutable transaction files and the canonical HistoryFiles tab.
