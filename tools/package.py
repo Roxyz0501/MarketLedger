@@ -10,12 +10,14 @@ artifacts = root / 'artifacts'
 artifacts.mkdir(exist_ok=True)
 manifest = json.loads((release / 'MarketLedger.json').read_text(encoding='utf-8-sig'))
 version = manifest['AssemblyVersion']
-assert version == '1.1.0.0' and manifest['Name'] == 'Gil Ledger'
+assert version == '1.2.0.0' and manifest['Name'] == 'Gil Ledger'
 assert manifest['Author'] == 'Roxyz0501' and manifest['DalamudApiLevel'] == 15
 assert manifest['RepoUrl'] == 'https://github.com/Roxyz0501/MarketLedger'
 assert manifest['IconUrl'].endswith('/MarketLedger/main/MarketLedger/images/icon.png')
 payload = {name: release / name for name in ['MarketLedger.dll', 'MarketLedger.json', 'MarketLedger.deps.json', 'LICENSE', 'NOTICE']}
 payload.update({'images/icon.png': root / 'MarketLedger/images/icon.png', 'README.md': root / 'README.md', 'VALIDATION.md': root / 'VALIDATION.md'})
+payload.update({name: root / name for name in ['PERSISTENCE_IMPLEMENTATION.md', 'PERSISTENCE_VALIDATION.md', 'tools/read_daily.py']})
+
 target = artifacts / f'MarketLedger-{version}.zip'
 with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED, compresslevel=9) as z:
     for name, source in payload.items():

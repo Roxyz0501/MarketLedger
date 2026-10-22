@@ -23,6 +23,7 @@ unsafe class Program
             object? Invoke(string method,params object?[] values)=>type.GetMethod(method,BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(plugin,values);
             void Set(string name,object? value)=>type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(plugin,value);
             object? Get(string name)=>type.GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(plugin);
+            Dummy.Config=(Configuration)Get("config")!;
             var store=(LedgerStore)Get("store")!;
             var actor=new Character("1001","Sample Adventurer","Chocobo","Chocobo");
             for(int i=0;i<24;i++) store.Insert(new(i.ToString(),DateTimeOffset.Now.AddDays(-i).ToUnixTimeSeconds(),actor,(uint)(100+i),i%2==0?"試験用クリスタル":"サンプル素材",i%3==0,(uint)(i+1),(uint)(100+i*97),(uint)(5+i*4),(100+i).ToString(),"2001",i%4==0?"":"Sample Retainer",1));
@@ -78,10 +79,38 @@ unsafe class Program
             Set("from","2026-02-30"); Invoke("Apply"); Check((bool)Get("dateError")!,"Invalid calendar date rejected");
             Check(((Filter)Get("filter")!).Search=="試験用","Invalid filter retains previous query");
             Check(Dummy.Saves==saves,"Search and invalid filters have zero config writes");
+            ((ArchivePump)Get("archivePump")!).Dispose(); // Isolate metadata UI from ongoing archive invalidations.
+            while(store.ArchivePending()>0) { }
+            void StorageFrame()
+            {
+                ImGui.NewFrame(); ImGui.SetNextWindowSize(new(1320,740)); ImGui.Begin("History files QA");
+                using(var font=Dummy.FontsHandle())
+                { ImGui.BeginTabBar("StorageTabs"); Invoke("DrawHistoryFiles"); ImGui.EndTabBar(); }
+                ImGui.End(); ImGui.Render();
+            }
+            StorageFrame(); StorageFrame();
+            ((Task?)Get("fileTask"))?.GetAwaiter().GetResult(); StorageFrame();
+            var measured=(FileMeasurement)Get("fileMeasurement")!;
+            Check(measured.Count>26 && measured.Bytes>0,"Canonical history tab includes database and daily records");
+            for(int i=0;i<20;i++) StorageFrame();
+            Check(Get("fileTask")==null && ReferenceEquals(measured,Get("fileMeasurement")),"Unchanged active tab reuses metadata snapshot");
+            Renderer.Render(ImGui.GetDrawData(),textures,Path.Combine(output,"ja-history-files.bmp"));
+            Dummy.Config.Language="fr"; Invoke("Save");
+            Check(Dummy.Saves==saves,"Configuration change never calls host SavePluginConfig");
+            Set("actor",actor); Set("actorId",1UL); Set("actorWorld",1U);
+            Invoke("QueuePurchase",new Purchase("logout",DateTimeOffset.Now.ToUnixTimeSeconds(),actor,42,"Sample",false,1,100,0,"logout-listing","","",0));
+            Invoke("RefreshActor"); ((Task)Get("logoutFlush")!).GetAwaiter().GetResult();
+            Check(store.Query(new(Source:-2),0,false).Rows.Any(x=>x.Id=="logout"),"Logout barrier drains confirmed transactions");
+            Check(System.Text.Json.JsonSerializer.Deserialize<SettingsState>(File.ReadAllText(Path.Combine(Dummy.Directory,"settings.json")))!.Language=="fr","Logout flush persists final settings");
+            Dummy.Config.Language="ko"; Invoke("Save");
+            Invoke("QueuePurchase",new Purchase("exit",DateTimeOffset.Now.ToUnixTimeSeconds(),actor,42,"Sample",false,1,100,0,"exit-listing","","",0));
         }
         Check(!Dummy.Commands.ContainsKey("/marketledger"),"Dispose removes command");
         Check(!Dummy.Commands.ContainsKey("/gilledger"),"Dispose removes renamed command");
         Check(Dummy.Subscriptions==0,"Dispose unsubscribes all events");
+        Check(System.Text.Json.JsonSerializer.Deserialize<SettingsState>(File.ReadAllText(Path.Combine(Dummy.Directory,"settings.json")))!.Language=="ko","Dispose flush persists final UI language");
+        using(var persisted=new LedgerStore(Path.Combine(Dummy.Directory,"market-ledger.db")))
+            Check(persisted.Query(new(Source:-2),0,false).Rows.Any(x=>x.Id=="exit"),"Dispose drains queued confirmed transaction");
         ImGui.DestroyContext(); foreach(var pin in Dummy.Pins) pin.Free();
         Console.WriteLine($"PASS: {checks} native ImGui/glyph/lifecycle/access checks. Screenshots: {output}");
     }

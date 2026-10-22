@@ -1,6 +1,6 @@
 namespace MarketLedger;
 
-public static class Loc
+public static partial class Loc
 {
     public static readonly string[] Codes = ["ja","en","de","fr","ko","zh-Hans","zh-Hant"];
     public static readonly Dictionary<string,string[]> Text = new()

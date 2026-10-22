@@ -27,7 +27,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private readonly Configuration config;
     private readonly LedgerStore store;
     private readonly PurchaseTracker tracker = new();
-    private readonly Channel<Purchase> writes = Channel.CreateBounded<Purchase>(new BoundedChannelOptions(256) { SingleReader=true, FullMode=BoundedChannelFullMode.Wait });
+    private readonly Channel<WriteRequest> writes = Channel.CreateBounded<WriteRequest>(new BoundedChannelOptions(256) { SingleReader=true, FullMode=BoundedChannelFullMode.Wait });
     private readonly ConcurrentQueue<Purchase> failed = new();
     private readonly Task writer;
     private readonly CancellationTokenSource shutdown = new();
@@ -48,15 +48,21 @@ public sealed partial class Plugin : IDalamudPlugin
         this.pi=pi; this.commands=commands; this.framework=framework; this.client=client;
         this.player=player; this.market=market; this.data=data; this.log=log;
         this.inventory=inventory;
-        config=pi.GetPluginConfig() as Configuration ?? new();
+        directory=pi.GetPluginConfigDirectory();
+        settings=new DeferredSettings(Path.Combine(directory,"settings.json"),()=>
+        {
+            var old=pi.GetPluginConfig() as Configuration ?? new();
+            return new(old.Version,old.Language,old.Recording);
+        },SettingsTime);
+        config=new() { Version=settings.Loaded.Version,Language=settings.Loaded.Language,Recording=settings.Loaded.Recording };
         string? game;
         try { game=client.ClientLanguage.ToString() switch {"Japanese"=>"ja","English"=>"en","German"=>"de","French"=>"fr",_=>null}; }
         catch { game=null; }
         string resolved=Loc.Resolve(config.Language,game,pi.UiLanguage);
         if(config.Language!=resolved) { config.Language=resolved; Save(); }
         Loc.Validate();
-        directory=pi.GetPluginConfigDirectory();
         store=new LedgerStore(Path.Combine(directory,"market-ledger.db"));
+        archivePump=new ArchivePump(()=>store.ArchivePending());
         recoveryFiles=Directory.EnumerateFiles(directory,"recovery-*.json").Take(100).ToArray();
         writer=Task.Run(WriteLoop);
         RefreshActor();
@@ -67,7 +73,7 @@ public sealed partial class Plugin : IDalamudPlugin
         commandInfo=new CommandInfo((_,_)=>Open()) {HelpMessage=T("CommandHelp")};
         commands.AddHandler("/marketledger",commandInfo);
         commands.AddHandler("/gilledger",commandInfo);
-        npcShop=new NpcShopObserver(interop,spending.Request,()=>config.Recording && !disposed?actor:null,log);
+        npcShop=new NpcShopObserver(interop,spending.Request,()=>config.Recording && !pauseRecordingRequested && !disposed?actor:null,log);
         inventory.InventoryChangedRaw+=OnInventory;
         framework.Update+=OnUpdate;
         market.OfferingsReceived+=OnOfferings;
@@ -77,9 +83,8 @@ public sealed partial class Plugin : IDalamudPlugin
         pi.UiBuilder.OpenMainUi+=Open;
         pi.UiBuilder.OpenConfigUi+=Open;
     }
-    private void Open() => open=true;
+    private void Open() { open=true; filesActive=false; }
     private string T(string key)=>Loc.Get(config.Language,key);
-    private void Save()=>pi.SavePluginConfig(config);
     private void RefreshActor()
     {
         ulong id=client.IsLoggedIn && player.IsLoaded?player.ContentId:0;
@@ -91,6 +96,7 @@ public sealed partial class Plugin : IDalamudPlugin
         if(actor?.Id!=next?.Id || actor?.World!=next?.World)
         {
             tracker.Clear(); DrainSpending(DateTimeOffset.UtcNow,true); spending.Clear();
+            if(actor!=null) { settings.Flush(); logoutFlush=FlushWrites(); }
             inventoryReadyAt=DateTimeOffset.UtcNow.AddSeconds(2);
         }
         actorId=id; actorWorld=worldId;
@@ -99,13 +105,16 @@ public sealed partial class Plugin : IDalamudPlugin
     private void OnUpdate(IFramework _)
     {
         if(disposed) return;
+        if(pauseRecordingRequested) { config.Recording=false; Save(); tracker.Clear(); spending.Clear(); pauseRecordingRequested=false; }
         RefreshActor();
         var now=DateTimeOffset.UtcNow;
+        settings.Tick(SettingsTime);
+        ReportPersistenceError();
         if(spending.HasPending && now>=nextDrain) { nextDrain=now.AddMilliseconds(250); DrainSpending(now); }
     }
     private void OnOfferings(IMarketBoardCurrentOfferings offers)
     {
-        if(!config.Recording || actor==null || disposed) return;
+        if(!config.Recording || pauseRecordingRequested || actor==null || disposed) return;
         var now=DateTimeOffset.UtcNow;
         tracker.Offer(offers.ItemListings.Select(x=>new Listing(x.ListingId,x.RetainerId,NormalizeItem(x.ItemId),x.IsHq,
             x.ItemQuantity,x.PricePerUnit,x.RetainerName,now)),now);
@@ -114,7 +123,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void OnRequested(IMarketBoardPurchaseHandler request)
     {
         var who=actor;
-        if(!config.Recording || who==null || disposed) return;
+        if(!config.Recording || pauseRecordingRequested || who==null || disposed) return;
         uint item=NormalizeItem(request.CatalogId);
         string name;
         try
@@ -129,7 +138,7 @@ public sealed partial class Plugin : IDalamudPlugin
     }
     private void OnPurchased(IMarketBoardPurchase purchase)
     {
-        if(!config.Recording || disposed) return;
+        if(!config.Recording || pauseRecordingRequested || disposed) return;
         var result=tracker.Confirm(purchase.CatalogId,purchase.ItemQuantity,actor,DateTimeOffset.UtcNow);
         if(result==null) return;
         spending.Known(result,DateTimeOffset.UtcNow);
@@ -137,16 +146,23 @@ public sealed partial class Plugin : IDalamudPlugin
     }
     private async Task WriteLoop()
     {
-        await foreach(var purchase in writes.Reader.ReadAllAsync())
+        await foreach(var request in writes.Reader.ReadAllAsync())
         {
-            try { store.Insert(purchase); }
-            catch(Exception e) { RecordFailure(purchase); log.Error(e,"Market Ledger could not persist a purchase."); }
+            if(request.Barrier!=null) { request.Barrier.TrySetResult(); continue; }
+            var purchase=request.Purchase!;
+            if(Volatile.Read(ref writeFailures)>=3) { RecordFailure(purchase); continue; }
+            try { store.Insert(purchase); Interlocked.Exchange(ref writeFailures,0); archivePump.Signal(); }
+            catch(Exception e)
+            {
+                RecordFailure(purchase);
+                if(Interlocked.Increment(ref writeFailures)==3) log.Error(e,"Gil Ledger writes paused after three failures; use Retry.");
+            }
         }
     }
     private void RecordFailure(Purchase purchase)
     {
         failed.Enqueue(purchase); open=true;
-        if(failed.Count>=256) { config.Recording=false; tracker.Clear(); spending.Clear(); }
+        if(failed.Count>=256) pauseRecordingRequested=true;
     }
     private void Recover()
     {
@@ -158,16 +174,18 @@ public sealed partial class Plugin : IDalamudPlugin
                 if(new FileInfo(path).Length>4*1024*1024) throw new InvalidDataException("Recovery file exceeds limit.");
                 var purchases=System.Text.Json.JsonSerializer.Deserialize<Purchase[]>(File.ReadAllText(path)) ?? throw new InvalidDataException("Empty recovery data");
                 if(purchases.Length>1024) throw new InvalidDataException("Recovery record count exceeds limit.");
-                foreach(var purchase in purchases) store.Insert(purchase);
+                foreach(var purchase in purchases) { shutdown.Token.ThrowIfCancellationRequested(); store.Insert(purchase); }
+                archivePump.Signal();
                 File.Move(path,path+".recovered",false);
             }
         });
     }
     private void RetryWrites()
     {
+        Interlocked.Exchange(ref writeFailures,0);
         int count=failed.Count;
         for(int i=0;i<count && failed.TryDequeue(out var p);i++)
-            if(!writes.Writer.TryWrite(p)) { failed.Enqueue(p); break; }
+            if(!writes.Writer.TryWrite(new(p))) { failed.Enqueue(p); break; }
     }
     private void UpdateFonts(string text)
     {
@@ -187,6 +205,7 @@ public sealed partial class Plugin : IDalamudPlugin
     }
     public void Dispose()
     {
+        if(disposed) return;
         disposed=true;
         npcShop.Dispose(); inventory.InventoryChangedRaw-=OnInventory;
         market.OfferingsReceived-=OnOfferings; market.PurchaseRequested-=OnRequested; market.ItemPurchased-=OnPurchased;
@@ -198,8 +217,14 @@ public sealed partial class Plugin : IDalamudPlugin
         DrainSpending(DateTimeOffset.UtcNow,true);
         writes.Writer.TryComplete();
         writer.GetAwaiter().GetResult();
+        try { logoutFlush?.GetAwaiter().GetResult(); } catch { }
         try { queryTask?.GetAwaiter().GetResult(); exportTask?.GetAwaiter().GetResult(); } catch { }
         try { recoveryTask?.GetAwaiter().GetResult(); } catch { }
+        archivePump.Dispose();
+        try { fileTask?.GetAwaiter().GetResult(); } catch { }
+        if(pauseRecordingRequested) { config.Recording=false; Save(); pauseRecordingRequested=false; }
+        settings.Dispose();
+        if(settings.Dirty) log.Error("Gil Ledger settings remain unsaved at shutdown: {Error}",settings.Error??"Unknown storage failure");
         // Preserve failed records for explicit recovery; never silently discard a failed database write.
         if(!failed.IsEmpty)
         {

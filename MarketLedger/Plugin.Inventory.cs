@@ -15,7 +15,7 @@ public sealed partial class Plugin
     private ulong actorId;
     private void OnInventory(IReadOnlyCollection<InventoryEventArgs> changes)
     {
-        if(disposed || !config.Recording || !client.IsLoggedIn) return;
+        if(disposed || !config.Recording || pauseRecordingRequested || !client.IsLoggedIn) return;
         RefreshActor();
         var who=actor; var now=DateTimeOffset.UtcNow;
         if(who==null || now<inventoryReadyAt) return;
@@ -51,5 +51,5 @@ public sealed partial class Plugin
         foreach(var purchase in spending.Drain(now,flush)) QueuePurchase(purchase);
     }
     private void QueuePurchase(Purchase purchase)
-    { if(!writes.Writer.TryWrite(purchase)) RecordFailure(purchase); }
+    { if(!writes.Writer.TryWrite(new(purchase))) RecordFailure(purchase); }
 }

@@ -33,7 +33,7 @@ public sealed partial class Plugin
         }
         if(exportTask?.IsCompleted==true)
         {
-            try { exportPath=exportTask.GetAwaiter().GetResult(); exportError=false; }
+            try { exportPath=exportTask.GetAwaiter().GetResult(); exportError=false; fileRevision=-1; }
             catch(Exception e) { exportError=true; log.Error(e,"Market Ledger CSV export failed."); }
             exportTask=null;
         }
@@ -72,6 +72,12 @@ public sealed partial class Plugin
         {
             if(!config.Recording) ImGui.TextColored(new Vector4(1,.65f,.2f,1),T("Paused"));
             if(!npcShop.Available) ImGui.TextWrapped(T("NpcUnavailable"));
+            if(settings.Recovered) ImGui.TextWrapped(T("SettingsRecovered"));
+            if(settings.Error!=null || archivePump.Error!=null)
+            {
+                ImGui.TextWrapped(T("PersistenceError"));
+                if(ImGui.Button(T("Retry")+"###RetryPersistence")) { settings.Retry(); archivePump.Retry(); }
+            }
             if(!failed.IsEmpty)
             {
                 ImGui.TextColored(new Vector4(1,.4f,.3f,1),T("WriteError"));
@@ -89,6 +95,7 @@ public sealed partial class Plugin
                 {
                     DrawFilters(); DrawSummary(); DrawChart(); ImGui.EndTabItem();
                 }
+                DrawHistoryFiles();
                 StandardPluginTabs.DrawStandardTrailingTabs(T("Settings"),"Settings",DrawSettings,
                     T("LanguageSettings"),DrawLanguage,T("Support"),()=>StandardPluginTabs.DrawSupportContent(T("SupportHeading"),T("SupportText"),T("SupportRecipient"),T("OpenKoFi")));
                 ImGui.EndTabBar();
@@ -272,6 +279,7 @@ public sealed partial class Plugin
     }
     private void DrawSettings()
     {
+        ImGui.TextWrapped(T("SavePolicy"));
         bool recording=config.Recording;
         if(ImGui.Checkbox(T("Recording")+"###Recording",ref recording)) { DrainSpending(DateTimeOffset.UtcNow,true); config.Recording=recording; tracker.Clear(); spending.Clear(); inventoryReadyAt=DateTimeOffset.UtcNow.AddSeconds(2); Save(); }
         ImGui.TextWrapped(T("Limitations")); ImGui.Spacing(); ImGui.TextWrapped(T("LocalOnly"));

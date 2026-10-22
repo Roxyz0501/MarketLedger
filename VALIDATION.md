@@ -1,3 +1,9 @@
+# Gil Ledger 1.2.0.0 validation — 2026-10-23 JST
+
+Persistence: 57 checks; core regression: 872 checks; native ImGui/font/lifecycle harness: 3,312 checks. Total: 4,241 passed. See PERSISTENCE_VALIDATION.md for conditions, measurements and limits. Clean Release build: zero warnings/errors. Live-game acceptance remains unverified.
+
+The following is the historical 1.1.0.0 baseline.
+
 # Gil Ledger 1.1.0.0 validation — 2026-10-18 JST
 
 ## Result

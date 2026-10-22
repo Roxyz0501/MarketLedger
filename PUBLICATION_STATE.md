@@ -1,5 +1,12 @@
 # Publication state
 
+## 2026-10-22 — Local persistence implementation (not published)
+
+- Implemented the audit follow-up in this original task folder: changed-only 60-second settings saves, three valid backups, corruption recovery, date-partitioned immutable transaction files and the canonical HistoryFiles tab.
+- Existing WAL/FULL SQLite remains the durable all-date index and Allagan Local reader endpoint; incremental archive checkpointing avoids rebuilding the compatibility database.
+- See PERSISTENCE_IMPLEMENTATION.md and PERSISTENCE_VALIDATION.md for reader contract, measurements and remaining game-host verification.
+- No production data migration or installed DLL replacement was performed. Public release and shared index remain at 1.1.0.0; no public repository changes were made for this audit follow-up.
+
 ## 2026-10-18 — Gil Ledger 1.1.0.0 public preview
 
 - Updated at the user's request to support NPC spending and source filtering; renamed display name from Market Ledger to Gil Ledger. Existing InternalName, DLL, repository, config path and database retained for update compatibility. New command /gilledger; /marketledger remains an alias.

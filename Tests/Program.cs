@@ -2,6 +2,8 @@ using MarketLedger;
 using System.Diagnostics;
 using System.Text;
 
+if(args.Length>0 && args[0]=="--persistence") { PersistenceTests.Run(Path.GetFullPath(args[1])); return; }
+
 if(args.Length>0 && args[0]=="--probe")
 {
     using var probe=new Sqlite(":memory:");

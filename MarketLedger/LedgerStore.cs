@@ -7,6 +7,11 @@ public sealed class LedgerStore : IDisposable
 {
     private readonly object gate = new();
     private readonly Sqlite db;
+    private readonly object archiveGate = new();
+    public DailyArchive Archive { get; }
+    public string ArchiveDirectory { get; }
+    public long ArchiveReadRows { get; private set; }
+    public long ArchiveBatches { get; private set; }
     private readonly Dictionary<(Filter, int, bool), QueryResult> cache = new();
     private long revision;
     public long Revision => Interlocked.Read(ref revision);
@@ -15,9 +20,11 @@ public sealed class LedgerStore : IDisposable
     public long RowsReturned { get; private set; }
     public const int PageSize = 100;
     private const string Columns = "id,time,cid,character,home,world,item,name,hq,quantity,unit,tax,listing,retainer,seller,city,source,tax_known,total";
-    public LedgerStore(string path)
+    public LedgerStore(string path, Action<string>? archiveFault = null)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(path))!);
+        ArchiveDirectory=Path.Combine(Path.GetDirectoryName(Path.GetFullPath(path))!,Path.GetFileNameWithoutExtension(path)+"-history");
+        Archive=new DailyArchive(ArchiveDirectory,"../"+Path.GetFileName(path),archiveFault);
         db = new Sqlite(path);
         try
         {
@@ -45,8 +52,37 @@ public sealed class LedgerStore : IDisposable
                 }
                 catch { db.Execute("ROLLBACK"); throw; }
             }
+            db.Execute("CREATE TABLE IF NOT EXISTS gil_archive_state (singleton INTEGER PRIMARY KEY CHECK(singleton=1),cursor INTEGER NOT NULL,records INTEGER NOT NULL,total INTEGER NOT NULL)");
+            db.Execute("INSERT OR IGNORE INTO gil_archive_state VALUES (1,0,0,0)");
         }
         catch { db.Dispose(); throw; }
+    }
+    // Each successful file is immutable. A failed batch leaves the cursor untouched and is
+    // safe to replay. The original DB remains the indexed all-date compatibility reader.
+    public int ArchivePending(int limit=64)
+    {
+        lock(archiveGate)
+        {
+            var batch=new List<(long Row,Purchase Purchase)>(); long cursor;
+            lock(gate)
+            {
+                using(var state=db.Prepare("SELECT cursor FROM gil_archive_state WHERE singleton=1"))
+                { state.Step(); cursor=state.Int(0); }
+                using var rows=db.Prepare($"SELECT {Columns},rowid FROM purchases WHERE rowid>? ORDER BY rowid LIMIT ?",cursor,Math.Clamp(limit,1,64));
+                while(rows.Step()) batch.Add((rows.Int(19),Read(rows)));
+                ArchiveReadRows+=batch.Count;
+            }
+            if(batch.Count==0) return 0;
+            foreach(var row in batch) Archive.Save(row.Purchase);
+            lock(gate)
+            {
+                // Compare-and-swap also prevents another game process moving the cursor backwards.
+                db.Execute("UPDATE gil_archive_state SET cursor=?,records=records+?,total=total+? WHERE singleton=1 AND cursor=?",
+                    batch[^1].Row,batch.Count,batch.Sum(x=>x.Purchase.Total),cursor);
+                ArchiveBatches++;
+            }
+            return batch.Count;
+        }
     }
     public bool Insert(Purchase p)
     {

@@ -1,6 +1,8 @@
 # Gil Ledger
 
-マーケット・NPC購入とギル減少をキャラクター別に記録する、Roxyz0501 の新規独立 Dalamud プラグインです。旧名 Market Ledger、`1.1.0.0`、API 15。**公開プレビュー版です。ゲーム内での実購入・NPCフック・所持金イベントは未確認です。**
+1.2.0.0の保存改善: 設定の60秒・変更時保存と正常3世代バックアップ、日付別取引ファイル、共通「履歴ファイル」タブを追加しました。既存SQLiteの全期間検索とAllagan Local互換性を維持します。方式・移行・reader契約は [PERSISTENCE_IMPLEMENTATION.md](PERSISTENCE_IMPLEMENTATION.md)、検証結果は [PERSISTENCE_VALIDATION.md](PERSISTENCE_VALIDATION.md) を参照してください。
+
+マーケット・NPC購入とギル減少をキャラクター別に記録する、Roxyz0501 の新規独立 Dalamud プラグインです。旧名 Market Ledger、`1.2.0.0`、API 15。**公開プレビュー版です。ゲーム内での実購入・NPCフック・所持金イベントは未確認です。**
 
 更新すると表示名が **Gil Ledger** になります。内部ID、保存先、GitHubリポジトリは互換性のため `MarketLedger` を維持し、従来の履歴・設定を引き継ぎます。旧DBは移行直前に `market-ledger.db.v1-backup-*` としてバックアップし、既存の購入を「マーケット」に分類します。移行後のDBを旧バージョンで開かないでください。
 
@@ -12,7 +14,7 @@ Dalamud設定（`/xlsettings`）の試験的機能から、カスタムプラグ
 
 保存後、`/xlplugins` で **Gil Ledger** を検索してインストールします。共通リポジトリをすでに登録している場合は、追加登録は不要です。Market Ledger利用者は同じプラグインの更新として適用できます。
 
-[リリース・ZIP](https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.1.0.0)
+[リリース・ZIP](https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.0)
 
 ## 使い方
 
@@ -58,7 +60,7 @@ Dalamud設定（`/xlsettings`）の試験的機能から、カスタムプラグ
 
 ## 言語
 
-日本語、English、Deutsch、Français、한국어、简体中文、繁體中文に対応。「言語設定」タブで変更し、即時反映・保存します。初回のみゲーム言語→Dalamud UI言語→Englishの順に決定します。公開ランチャー言語APIは使用していません。保存済みの選択を起動時やキャラ切替時に上書きしません。
+日本語、English、Deutsch、Français、한국어、简体中文、繁體中文に対応。「言語設定」タブで変更すると即時反映します。設定変更を60秒ごとに保存し、ログアウト・終了時にもflushします。初回のみゲーム言語→Dalamud UI言語→Englishの順に決定します。公開ランチャー言語APIは使用していません。保存済みの選択を起動時やキャラ切替時に上書きしません。
 
 アイテム名は購入時のゲームデータから取得した正式名を保持します。UI言語を変えても過去のアイテム名は翻訳しません。フォントはDalamud提供のNoto Sans CJKを使用し、画面の文字に必要なグリフだけをキャッシュします。
 
@@ -69,7 +71,7 @@ Dalamud設定（`/xlsettings`）の試験的機能から、カスタムプラグ
 - [Dalamud](https://github.com/goatcorp/Dalamud) — goatcorp、AGPL-3.0。公開の `IMarketBoard.OfferingsReceived` / `PurchaseRequested` / `ItemPurchased`、`IGameInventory.InventoryChangedRaw`、プレイヤー状態・フック・フォント・UI APIを利用します。Dalamud本体は同梱しません。
 - [FFXIVClientStructs](https://github.com/aers/FFXIVClientStructs) — aersと貢献者、MIT。ホストが提供する `ShopEventHandler.ExecuteBuy` の関数ポインター・ショップ状態・商品価格・数量の構造体APIを参照します。元の購入処理は引数を変えず1回呼び出し、購入を自動実行しません。ソースやDLLは同梱しません。
 - [購入要求API](https://dalamud.dev/api/Dalamud.Game.Network.Structures/Interfaces/IMarketBoardPurchaseHandler/) と [購入結果API](https://dalamud.dev/api/Dalamud.Game.Network.Structures/Interfaces/IMarketBoardPurchase/) の契約を参照しました。
-- 共有タブはRoxyz0501ワークスペースの `templates/Dalamud/StandardPluginTabs.cs` をそのまま使用します。表示順は購入履歴／支出グラフ／設定／言語設定／支援です。
+- 共有タブはRoxyz0501ワークスペースの `templates/Dalamud/StandardPluginTabs.cs` をそのまま使用します。表示順は購入履歴／支出グラフ／履歴ファイル／設定／言語設定／支援です。
 - [BaitBeacon](https://github.com/Roxyz0501/BaitBeacon) — Roxyz0501、Apache-2.0。作者共通の言語ラベル・フォントAPI使用方法を参考にしています。外部作者のコードはコピーしていません。
 - [CommandAtlas](https://github.com/Roxyz0501/CommandAtlas) — Roxyz0501。作者のテスト用ソフトウェアレンダラーを画面検証に再利用しています。配布物には入りません。
 - Windows内蔵 `winsqlite3.dll` を使用。購入データを扱うための追加プラグイン、外部サービス、同梱ネイティブDB DLLはありません。
