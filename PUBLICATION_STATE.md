@@ -1,5 +1,16 @@
 # Publication state
 
+## 2026-10-25 — Gil Ledger 1.2.0.1 review fixes published
+
+- Release: https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.1
+- ZIP: https://github.com/Roxyz0501/MarketLedger/releases/download/v1.2.0.1/MarketLedger-1.2.0.1.zip
+- Source/tag: `ace6cc92a4c6f40f6a9e2e73d74eb87d401a3f3a`; ZIP 144,693 bytes, 11 allowlisted files; SHA-256 `0B70E3FC44D6054F82C51514A3482541A0DBF61F740224716864C1A07375EA06`.
+- Fixed seven reproduced issue groups: shutdown CSV join after query faults; UI-context logout-flush deadlock; pending spending loss on automatic pause; CSV partial-file collision deletion; empty-export cancellation; invalid recovery IDs/timestamps/totals; Windows-calendar date filter mismatch.
+- 4,252 checks passed: 872 core, 57 persistence, 3,312 native ImGui/glyph/lifecycle, 6 new core review and 5 new lifecycle/culture checks. Clean Release zero warnings/errors; canonical helpers match; source/DLL credential/local-path scans and package checks passed. See VALIDATION.md for reproductions and measured IO.
+- Anonymous repository/icon HTTP200 (image/png), ZIP hash/manifest verified. Shared index `759bad7977f9899e0042b1e6f1e5dc1988e3db28`: commit-pinned and normal main URLs verified at 1.2.0.1; all 13 other entries preserved, including a concurrent new registration.
+- Published under the project-wide continuing publication authorization dated 2026-10-23. Connector used for source/index/records, CLI for unsupported Release/assets and local Git sync. Public preview: live-game hooks, notifications, lifecycle and physical SSD IO remain unverified. No installed DLL or production data modified.
+
+
 ## 2026-10-23 — Gil Ledger 1.2.0.0 published
 
 - Release: https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.0
