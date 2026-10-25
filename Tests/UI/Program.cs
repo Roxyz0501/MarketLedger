@@ -17,6 +17,12 @@ unsafe class Program
         string output=Path.GetFullPath(args[0]); Directory.CreateDirectory(output); Dummy.Directory=Path.Combine(output,"data");
         ImGui.CreateContext(); var io=ImGui.GetIO(); io.DisplaySize=new(1440,900); io.DeltaTime=1f/60;
         io.ConfigInputTrickleEventQueue=false; io.IniFilename=null;
+        if(args.Contains("--review"))
+        {
+            ReviewLifecycle();
+            ImGui.DestroyContext(); foreach(var pin in Dummy.Pins) pin.Free();
+            return;
+        }
         using(var plugin=new Plugin(Stub<IDalamudPluginInterface>(),Stub<ICommandManager>(),Stub<IFramework>(),Stub<IClientState>(),Stub<IPlayerState>(),Stub<IMarketBoard>(),Stub<IDataManager>(),Stub<IPluginLog>(),Stub<IGameInventory>(),Stub<IGameInteropProvider>()))
         {
             var type=typeof(Plugin);
@@ -113,6 +119,63 @@ unsafe class Program
             Check(persisted.Query(new(Source:-2),0,false).Rows.Any(x=>x.Id=="exit"),"Dispose drains queued confirmed transaction");
         ImGui.DestroyContext(); foreach(var pin in Dummy.Pins) pin.Free();
         Console.WriteLine($"PASS: {checks} native ImGui/glyph/lifecycle/access checks. Screenshots: {output}");
+    }
+
+    static void ReviewLifecycle()
+    {
+        int failures=0;
+        void Verify(bool value,string label) { Console.WriteLine($"{(value?"PASS":"FAIL")}: {label}"); if(!value) failures++; }
+        var prior=System.Globalization.CultureInfo.CurrentCulture;
+        System.Globalization.CultureInfo.CurrentCulture=System.Globalization.CultureInfo.GetCultureInfo("th-TH");
+        using var plugin=new Plugin(Stub<IDalamudPluginInterface>(),Stub<ICommandManager>(),Stub<IFramework>(),Stub<IClientState>(),Stub<IPlayerState>(),Stub<IMarketBoard>(),Stub<IDataManager>(),Stub<IPluginLog>(),Stub<IGameInventory>(),Stub<IGameInteropProvider>());
+        object? Get(string name)=>typeof(Plugin).GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(plugin);
+        void Set(string name,object? value)=>typeof(Plugin).GetField(name,BindingFlags.NonPublic|BindingFlags.Instance)!.SetValue(plugin,value);
+        object? Invoke(string name,params object?[] args)=>typeof(Plugin).GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance)!.Invoke(plugin,args);
+        Verify((string)Get("from")! == DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd",System.Globalization.CultureInfo.InvariantCulture),"Initial date filter uses Gregorian years regardless of Windows culture");
+        System.Globalization.CultureInfo.CurrentCulture=prior;
+        var spending=(SpendingTracker)Get("spending")!;
+        spending.Observe(new("review","Synthetic","Alpha","Alpha"),DateTimeOffset.UtcNow,400,[]);
+        Set("pauseRecordingRequested",true);
+        Invoke("OnUpdate",new object?[]{null});
+        ((Task)Invoke("FlushWrites")!).GetAwaiter().GetResult();
+        Verify(((LedgerStore)Get("store")!).Query(new(Source:2),0,false).Totals.Total==400,"Automatic recording pause preserves already observed wallet decreases");
+        // Keep a purchase ahead of the flush barrier blocked until the UI context is installed.
+        var ledger=(LedgerStore)Get("store")!;
+        var dbGate=typeof(LedgerStore).GetField("gate",BindingFlags.NonPublic|BindingFlags.Instance)!.GetValue(ledger)!;
+        var uiContext=new QueuedContext(); var previousContext=SynchronizationContext.Current;
+        Task barrier;
+        Monitor.Enter(dbGate);
+        try
+        {
+            Invoke("QueuePurchase",new Purchase("context",DateTimeOffset.UtcNow.ToUnixTimeSeconds(),new("review","Synthetic","Alpha","Alpha"),42,"Sample",false,1,100,0,"context-listing","","",0));
+            SynchronizationContext.SetSynchronizationContext(uiContext);
+            barrier=(Task)Invoke("FlushWrites")!;
+        }
+        finally { SynchronizationContext.SetSynchronizationContext(previousContext); Monitor.Exit(dbGate); }
+        bool independent=barrier.Wait(500);
+        uiContext.Drain();
+        Verify(barrier.Wait(5000) && independent,"Logout flush completes without a UI-context continuation");
+        var export=new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Set("queryTask",Task.FromException<QueryResult>(new IOException("Injected failed query")));
+        Set("exportTask",export.Task);
+        using var entered=new ManualResetEventSlim();
+        using var registration=((CancellationTokenSource)Get("shutdown")!).Token.Register(entered.Set);
+        var dispose=Task.Run(plugin.Dispose);
+        bool started=entered.Wait(5000);
+        bool returnedEarly=dispose.Wait(500);
+        export.SetResult("synthetic-export.csv");
+        dispose.GetAwaiter().GetResult();
+        Verify(started && !returnedEarly,"Dispose waits for CSV completion even when query task failed");
+        Verify(Dummy.Subscriptions==0 && Dummy.Commands.Count==0,"Review disposal removes events and commands");
+        if(failures>0) throw new Exception($"{failures} lifecycle review regressions");
+        Console.WriteLine("PASS: 5 lifecycle review checks.");
+    }
+
+    sealed class QueuedContext:SynchronizationContext
+    {
+        readonly System.Collections.Concurrent.ConcurrentQueue<(SendOrPostCallback Callback,object? State)> queue=new();
+        public override void Post(SendOrPostCallback callback,object? state)=>queue.Enqueue((callback,state));
+        public void Drain() { while(queue.TryDequeue(out var item)) item.Callback(item.State); }
     }
 }
 public unsafe class Dummy:DispatchProxy

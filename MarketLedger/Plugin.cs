@@ -68,7 +68,7 @@ public sealed partial class Plugin : IDalamudPlugin
         RefreshActor();
         filter = new Filter(CharacterId:actor?.Id ?? "",From:new DateTimeOffset(DateTime.Today.AddDays(-29)).ToUnixTimeSeconds());
         selectedCharacter=filter.CharacterId;
-        from=DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd");
+        from=DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd",System.Globalization.CultureInfo.InvariantCulture);
         UpdateFonts("");
         commandInfo=new CommandInfo((_,_)=>Open()) {HelpMessage=T("CommandHelp")};
         commands.AddHandler("/marketledger",commandInfo);
@@ -105,7 +105,7 @@ public sealed partial class Plugin : IDalamudPlugin
     private void OnUpdate(IFramework _)
     {
         if(disposed) return;
-        if(pauseRecordingRequested) { config.Recording=false; Save(); tracker.Clear(); spending.Clear(); pauseRecordingRequested=false; }
+        if(pauseRecordingRequested) { config.Recording=false; Save(); DrainSpending(DateTimeOffset.UtcNow,true); tracker.Clear(); spending.Clear(); pauseRecordingRequested=false; }
         RefreshActor();
         var now=DateTimeOffset.UtcNow;
         settings.Tick(SettingsTime);
@@ -218,7 +218,8 @@ public sealed partial class Plugin : IDalamudPlugin
         writes.Writer.TryComplete();
         writer.GetAwaiter().GetResult();
         try { logoutFlush?.GetAwaiter().GetResult(); } catch { }
-        try { queryTask?.GetAwaiter().GetResult(); exportTask?.GetAwaiter().GetResult(); } catch { }
+        try { queryTask?.GetAwaiter().GetResult(); } catch { }
+        try { exportTask?.GetAwaiter().GetResult(); } catch { }
         try { recoveryTask?.GetAwaiter().GetResult(); } catch { }
         archivePump.Dispose();
         try { fileTask?.GetAwaiter().GetResult(); } catch { }

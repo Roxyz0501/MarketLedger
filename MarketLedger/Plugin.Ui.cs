@@ -141,9 +141,9 @@ public sealed partial class Plugin
         if(ImGui.Button(T("Apply")+"###Apply")) Apply(); ImGui.SameLine();
         if(ImGui.Button(T("Refresh")+"###Refresh")) { forceRefresh=true; dirty=true; } ImGui.SameLine();
         if(ImGui.Button(T("Reset")+"###Reset")) { selectedCharacter=""; search=world=from=until=min=max=""; quality=sort=0; source=-1; Apply(); }
-        ImGui.SameLine(); if(ImGui.Button(T("Today")+"###Today")) { from=until=DateTime.Today.ToString("yyyy-MM-dd"); Apply(); }
-        ImGui.SameLine(); if(ImGui.Button(T("Month")+"###Month")) { from=new DateTime(DateTime.Today.Year,DateTime.Today.Month,1).ToString("yyyy-MM-dd"); until=DateTime.Today.ToString("yyyy-MM-dd"); Apply(); }
-        ImGui.SameLine(); if(ImGui.Button(T("Last30")+"###Last30")) { from=DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd"); until=DateTime.Today.ToString("yyyy-MM-dd"); Apply(); }
+        ImGui.SameLine(); if(ImGui.Button(T("Today")+"###Today")) { from=until=DateTime.Today.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); Apply(); }
+        ImGui.SameLine(); if(ImGui.Button(T("Month")+"###Month")) { from=new DateTime(DateTime.Today.Year,DateTime.Today.Month,1).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); until=DateTime.Today.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); Apply(); }
+        ImGui.SameLine(); if(ImGui.Button(T("Last30")+"###Last30")) { from=DateTime.Today.AddDays(-29).ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); until=DateTime.Today.ToString("yyyy-MM-dd",CultureInfo.InvariantCulture); Apply(); }
         ImGui.SameLine(); if(ImGui.Button(T("AllTime")+"###AllTime")) { from=until=""; Apply(); }
         ImGui.TextWrapped(T("Applied"));
         ImGui.TextWrapped(T("SourceHelp"));

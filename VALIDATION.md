@@ -1,3 +1,38 @@
+# Gil Ledger 1.2.0.1 review — 2026-10-25 JST
+
+Reviewed recording/reconciliation, SQLite transactions and migration, filtering/totals/graphs, CSV, configuration backups, daily archive, metadata UI, lifecycle, localization and packaging. Tests use isolated synthetic data and mocked game services; live-game NPC hooks, market notifications and physical SSD IO remain unverified.
+
+## Reproduced bugs and fixes
+
+- Shutdown skipped joining CSV work when the query task faulted. Each task is now joined independently.
+- Logout flush captured a UI synchronization context and could deadlock when Dispose synchronously waited. Both awaits now use ConfigureAwait(false); a queued UI-context regression reproduces the old behavior.
+- Automatic recording pause discarded already observed pending wallet decreases. It now drains spending before clearing reconciliation state.
+- A CSV temporary-file collision deleted a pre-existing .partial file. Cleanup now applies only to files created by this export.
+- A cancelled zero-row export still produced a final CSV. Cancellation is checked before creating and before publishing the file.
+- Recovery inserts accepted empty record IDs, out-of-range timestamps and inconsistent known-tax totals, which could break archive/query/export or alter totals. These rows are rejected before any transaction write.
+- Date preset text used the Windows calendar while parsing expected Gregorian dates. Initial and preset dates now use invariant Gregorian formatting; verified with th-TH culture.
+
+## Validation
+
+- Core regression: 872 passed. Persistence/failure/restart: 57 passed. Native ImGui/glyph/lifecycle: 3,312 passed. New core review: 6 passed; lifecycle/culture review: 5 passed. Total: **4,252 passed**.
+- Before fixes, all six new core assertions failed; three initial lifecycle assertions and the additional UI-context assertion failed. All now pass.
+- Core fixture: 999 additional durable inserts took 50,813 ms. Cold view: 4 SELECTs; unchanged: 0 reads/writes; page navigation: 1 SELECT / at most 100 rows; 20 concurrent identical queries: 4 SELECTs total. No network calls by design.
+- Persistence measurements unchanged: eight idle cycles 0 writes / 0 payload bytes; 120 edits coalesced to one save; three edited settings commits 143 payload bytes. Physical SSD writes were not measured.
+- Shared Language/Support and HistoryFiles helpers are byte-identical to the canonical templates. Seven-language font rendering and UI lifecycle checks passed.
+- Clean Release rebuild: zero warnings/errors. The 11-file allowlisted ZIP and manifest validation passed; public download results are recorded in PUBLICATION_STATE.md.
+
+Commands (each uses a fresh test-results subdirectory):
+
+```text
+dotnet run --project Tests/Tests.csproj -c Release --no-restore -- test-results/review-core-20261025
+dotnet run --project Tests/Tests.csproj -c Release --no-restore -- --persistence test-results/review-persistence-20261025
+dotnet run --project Tests/Tests.csproj -c Release --no-restore -- --review test-results/review-20261025-fixed
+dotnet run --project Tests/UI/UiTests.csproj -c Release --no-restore -- test-results/review-full-ui-20261025
+dotnet run --project Tests/UI/UiTests.csproj -c Release --no-restore -- test-results/review-ui-context-20261025-fixed --review
+```
+
+## Historical validation records
+
 # Gil Ledger 1.2.0.0 validation — 2026-10-23 JST
 
 Persistence: 57 checks; core regression: 872 checks; native ImGui/font/lifecycle harness: 3,312 checks. Total: 4,241 passed. See PERSISTENCE_VALIDATION.md for conditions, measurements and limits. Clean Release build: zero warnings/errors. Live-game acceptance remains unverified.

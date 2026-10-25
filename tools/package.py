@@ -10,7 +10,7 @@ artifacts = root / 'artifacts'
 artifacts.mkdir(exist_ok=True)
 manifest = json.loads((release / 'MarketLedger.json').read_text(encoding='utf-8-sig'))
 version = manifest['AssemblyVersion']
-assert version == '1.2.0.0' and manifest['Name'] == 'Gil Ledger'
+assert version == '1.2.0.1' and manifest['Name'] == 'Gil Ledger'
 assert manifest['Author'] == 'Roxyz0501' and manifest['DalamudApiLevel'] == 15
 assert manifest['RepoUrl'] == 'https://github.com/Roxyz0501/MarketLedger'
 assert manifest['IconUrl'].endswith('/MarketLedger/main/MarketLedger/images/icon.png')

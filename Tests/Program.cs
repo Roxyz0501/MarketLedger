@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Text;
 
 if(args.Length>0 && args[0]=="--persistence") { PersistenceTests.Run(Path.GetFullPath(args[1])); return; }
+if(args.Length>0 && args[0]=="--review") { ReviewTests.Run(Path.GetFullPath(args[1])); return; }
 
 if(args.Length>0 && args[0]=="--probe")
 {

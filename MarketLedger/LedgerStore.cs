@@ -86,8 +86,10 @@ public sealed class LedgerStore : IDisposable
     }
     public bool Insert(Purchase p)
     {
-        if (string.IsNullOrEmpty(p.Character.Id) || string.IsNullOrEmpty(p.ListingId) || p.ListingId == "0" || !Enum.IsDefined(p.Source)
+        if (string.IsNullOrWhiteSpace(p.Id) || p.Time < -62135596800L || p.Time > 253402300799L
+            || string.IsNullOrEmpty(p.Character.Id) || string.IsNullOrEmpty(p.ListingId) || p.ListingId == "0" || !Enum.IsDefined(p.Source)
             || p.Total<=0 || (p.Source is ExpenseSource.Market or ExpenseSource.NpcShop && (p.Quantity==0 || p.ItemId==0 || !p.TaxKnown || p.Total!=p.Subtotal+p.Tax))
+            || (p.TaxKnown && p.Total!=checked(p.Subtotal+p.Tax))
             || (!p.TaxKnown && (p.Subtotal!=0 || p.Tax!=0))) throw new InvalidDataException("Invalid purchase");
         lock (gate)
         {
@@ -176,10 +178,14 @@ public sealed class LedgerStore : IDisposable
         {
             var (where,args) = Where(filter);
             string partial = path + ".partial";
+            bool ownsPartial = false;
             try
             {
+                cancellation.ThrowIfCancellationRequested();
                 long count = 0;
                 using (var file = new FileStream(partial,FileMode.CreateNew,FileAccess.Write,FileShare.None))
+                {
+                ownsPartial = true;
                 using (var writer = new StreamWriter(file,new UTF8Encoding(true)))
                 using (var s = db.Prepare($"SELECT {Columns} FROM purchases{where} ORDER BY {Order(filter)}",args))
                 {
@@ -195,9 +201,17 @@ public sealed class LedgerStore : IDisposable
                         writer.WriteLine(string.Join(',',cells.Select(CsvCell))); count++; RowsReturned++;
                     }
                 }
+                }
+                cancellation.ThrowIfCancellationRequested();
                 File.Move(partial,path,false); return count;
             }
-            catch { if (File.Exists(partial)) File.Delete(partial); throw; }
+            catch
+            {
+                // A failed CreateNew does not grant ownership of another export's file.
+                if(ownsPartial)
+                    try { File.Delete(partial); } catch(Exception e) when(e is IOException or UnauthorizedAccessException) { }
+                throw;
+            }
         }
     }
     public void Dispose() { lock (gate) { cache.Clear(); db.Dispose(); } }

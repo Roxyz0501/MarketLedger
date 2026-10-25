@@ -29,8 +29,9 @@ public sealed partial class Plugin
     private async Task FlushWrites()
     {
         var done=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await writes.Writer.WriteAsync(new(null,done));
-        await done.Task;
+        // Dispose may synchronously join this task on the framework/UI thread.
+        await writes.Writer.WriteAsync(new(null,done)).ConfigureAwait(false);
+        await done.Task.ConfigureAwait(false);
     }
     private void RequestFileRefresh()
     {
