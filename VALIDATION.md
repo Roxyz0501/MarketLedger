@@ -1,3 +1,7 @@
+# 1.2.0.2 — 2026-11-23
+
+Canonical StandardPluginInfo.cs and StandardPluginTabs.cs copied byte-for-byte. Dependencies are empty: Gil Ledger uses host APIs and Windows SQLite, not another plugin. Allagan Local consumes this plugin data and is not a dependency. The trailing helper receives null for drawInfo when definition count is zero; the Information tab is fully hidden. Existing tabs and saved settings are preserved. Release build: zero warnings/errors. Native UI harness checks zero dependency definitions and zero installed-plugin enumeration. Live game verification remains outstanding. The test project emits MSB3246 for a host native DLL wildcard reference.
+
 # Gil Ledger 1.2.0.1 review — 2026-10-25 JST
 
 Reviewed recording/reconciliation, SQLite transactions and migration, filtering/totals/graphs, CSV, configuration backups, daily archive, metadata UI, lifecycle, localization and packaging. Tests use isolated synthetic data and mocked game services; live-game NPC hooks, market notifications and physical SSD IO remain unverified.

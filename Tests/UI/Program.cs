@@ -60,6 +60,8 @@ unsafe class Program
             }
             Check(store.ReadStatements==reads && store.PurchaseWrites==writes,"Rendering makes zero DB reads/writes");
             Check(Dummy.Saves==saves,"Drawing does not save config");
+            Check(((Array)type.GetField("Dependencies",BindingFlags.NonPublic|BindingFlags.Static)!.GetValue(null)!).Length==0,"No external plugin dependency definitions");
+            Check(Dummy.InstalledReads==0,"Hidden information tab does not enumerate installed plugins");
             Dummy.Config.Language="ja";
             Set("source",1); Invoke("Apply");
             Check(((Filter)Get("filter")!).Source==1,"NPC source filter applied");
@@ -182,7 +184,7 @@ public unsafe class Dummy:DispatchProxy
 {
     public static Configuration Config=new(){Language="ja"};
     public static string Directory="";
-    public static int Saves,Subscriptions;
+    public static int Saves,Subscriptions,InstalledReads;
     public static readonly Dictionary<string,CommandInfo> Commands=new();
     public static readonly List<ImFontPtr> Fonts=new();
     public static readonly List<GCHandle> Pins=new();
@@ -195,6 +197,7 @@ public unsafe class Dummy:DispatchProxy
         if(method.Name.StartsWith("remove_")) { Subscriptions--; return null; }
         switch(method.Name)
         {
+            case "get_InstalledPlugins": InstalledReads++; throw new Exception("Unexpected dependency enumeration");
             case "GetPluginConfig": return Config;
             case "GetPluginConfigDirectory": return Directory;
             case "get_UiLanguage": return "en";

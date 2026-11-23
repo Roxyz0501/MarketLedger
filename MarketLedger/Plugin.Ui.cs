@@ -8,6 +8,8 @@ namespace MarketLedger;
 
 public sealed partial class Plugin
 {
+    private static readonly PluginDependency[] Dependencies = [];
+    private readonly StandardPluginInfo dependencyInfo = new(Dependencies);
     private Filter filter = new();
     private string selectedCharacter="",search="",world="",from="",until="",min="",max="";
     private int quality,sort,page,metric,source=-1;
@@ -97,7 +99,8 @@ public sealed partial class Plugin
                 }
                 DrawHistoryFiles();
                 StandardPluginTabs.DrawStandardTrailingTabs(T("Settings"),"Settings",DrawSettings,
-                    T("LanguageSettings"),DrawLanguage,T("Support"),()=>StandardPluginTabs.DrawSupportContent(T("SupportHeading"),T("SupportText"),T("SupportRecipient"),T("OpenKoFi")));
+                    T("LanguageSettings"),DrawLanguage,T("Support"),()=>StandardPluginTabs.DrawSupportContent(T("SupportHeading"),T("SupportText"),T("SupportRecipient"),T("OpenKoFi")),
+                    StandardPluginInfo.Title(config.Language!), Dependencies.Length == 0 ? null : () => dependencyInfo.Draw(pi, config.Language!));
                 ImGui.EndTabBar();
             }
         }

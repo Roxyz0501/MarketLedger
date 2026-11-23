@@ -1,10 +1,10 @@
 # Gil Ledger
 
-1.2.0.1: 終了時の保存待機、自動記録停止時の支出保持、CSVの失敗・キャンセル処理、復旧データ検証、日付フィルタの暦依存を修正しました。全体再検証は計4,252件成功。詳細は [VALIDATION.md](VALIDATION.md) を参照してください。
+1.2.0.2: 終了時の保存待機、自動記録停止時の支出保持、CSVの失敗・キャンセル処理、復旧データ検証、日付フィルタの暦依存を修正しました。全体再検証は計4,252件成功。詳細は [VALIDATION.md](VALIDATION.md) を参照してください。
 
 1.2.0.0の保存改善: 設定の60秒・変更時保存と正常3世代バックアップ、日付別取引ファイル、共通「履歴ファイル」タブを追加しました。既存SQLiteの全期間検索とAllagan Local互換性を維持します。方式・移行・reader契約は [PERSISTENCE_IMPLEMENTATION.md](PERSISTENCE_IMPLEMENTATION.md)、検証結果は [PERSISTENCE_VALIDATION.md](PERSISTENCE_VALIDATION.md) を参照してください。
 
-マーケット・NPC購入とギル減少をキャラクター別に記録する、Roxyz0501 の新規独立 Dalamud プラグインです。旧名 Market Ledger、`1.2.0.1`、API 15。**公開プレビュー版です。ゲーム内での実購入・NPCフック・所持金イベントは未確認です。**
+マーケット・NPC購入とギル減少をキャラクター別に記録する、Roxyz0501 の新規独立 Dalamud プラグインです。旧名 Market Ledger、`1.2.0.2`、API 15。**公開プレビュー版です。ゲーム内での実購入・NPCフック・所持金イベントは未確認です。**
 
 更新すると表示名が **Gil Ledger** になります。内部ID、保存先、GitHubリポジトリは互換性のため `MarketLedger` を維持し、従来の履歴・設定を引き継ぎます。旧DBは移行直前に `market-ledger.db.v1-backup-*` としてバックアップし、既存の購入を「マーケット」に分類します。移行後のDBを旧バージョンで開かないでください。
 
@@ -16,7 +16,7 @@ Dalamud設定（`/xlsettings`）の試験的機能から、カスタムプラグ
 
 保存後、`/xlplugins` で **Gil Ledger** を検索してインストールします。共通リポジトリをすでに登録している場合は、追加登録は不要です。Market Ledger利用者は同じプラグインの更新として適用できます。
 
-[リリース・ZIP](https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.1)
+[リリース・ZIP](https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.2)
 
 ## 使い方
 
@@ -92,3 +92,5 @@ dotnet run --project Tests/UI/UiTests.csproj -c Release -- test-results/ui-new
 テスト出力先は毎回新しいディレクトリを指定してください。測定結果・未確認事項は `VALIDATION.md` を参照してください。ソース・ライセンス・リリースはこの個別GitHubリポジトリ、インストール用インデックスは共通Roxyz0501 Dalamudリポジトリで管理します。追加の前提プラグインはありません。
 
 任意の支援: [Roxyz0501 on Ko-fi](https://ko-fi.com/roxyz0501)。プラグインからは支援ボタンをクリックしたときだけ開きます。
+
+共通の情報タブに対応しています。Gil Ledgerは外部プラグイン依存が0件のため、情報タブは表示しません。Allagan Localは履歴の利用側であり、本プラグインの依存先ではありません。
