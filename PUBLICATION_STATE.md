@@ -1,5 +1,14 @@
 # Publication state
 
+## 2026-11-23 — Gil Ledger 1.2.0.2 published
+
+- Release: https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.2
+- Source: `2c72d462896c3b3d19491dca8fbc54387fbdc815`; ZIP 150,922 bytes; SHA256 `7F91F0FB0DD93F015DC9F8E77E0E9B245DCC41B1FCF77FDC4B744560462F1988`.
+- Canonical StandardPluginInfo/StandardPluginTabs copied unchanged. External dependency definitions: zero. Null information callback hides the tab completely; no installed-plugin reads. Allagan Local is a consumer, not a dependency.
+- Release build zero warnings/errors; 3,314 native UI/glyph/lifecycle checks passed. UI test host wildcard references emit MSB3246; live game remains unverified.
+- Public repository, PNG icon, ZIP hash/manifest and pinned/normal main index verified. Shared index commit `608d4ee0d2ddc1ae1413ebb5fb029dd8b1a029e3`; only MarketLedger updated.
+
+
 ## 2026-10-25 — Gil Ledger 1.2.0.1 review fixes published
 
 - Release: https://github.com/Roxyz0501/MarketLedger/releases/tag/v1.2.0.1
